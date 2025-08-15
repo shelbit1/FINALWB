@@ -42,23 +42,23 @@ interface NomenclatureResponse {
   };
 }
 
-// Функция для чтения вложенных свойств объекта (аналог _readOBJ)
-function readObjectProperty(obj: any, key: string, separator: string = '.'): any {
-  if (!obj || !key) return '';
-  
-  let value = obj;
-  const keys = key.split(separator);
-  
-  try {
-    for (const k of keys) {
-      if (value === null || value === undefined) return '';
-      value = value[k];
-    }
-    return value !== undefined ? value : '';
-  } catch (error) {
-    return '';
-  }
-}
+// Функция для чтения вложенных свойств объекта (аналог _readOBJ) - не используется
+// function readObjectProperty(obj: Record<string, unknown>, key: string, separator: string = '.'): unknown {
+//   if (!obj || !key) return '';
+//   
+//   let value: unknown = obj;
+//   const keys = key.split(separator);
+//   
+//   try {
+//     for (const k of keys) {
+//       if (value === null || value === undefined) return '';
+//       value = (value as Record<string, unknown>)[k];
+//     }
+//     return value !== undefined ? value : '';
+//   } catch {
+//     return '';
+//   }
+// }
 
 export async function POST(request: Request) {
   try {
@@ -77,31 +77,31 @@ export async function POST(request: Request) {
 
     const base = "https://content-api.wildberries.ru/content/v2/get/cards/list?locale=ru";
     
-    // Определяем заголовки для Excel
-    const headers = [
-      'nmID',
-      'imtID', 
-      'vendorCode',
-      'brand',
-      'title',
-      'object',
-      'dimensions.length',
-      'dimensions.width', 
-      'dimensions.height',
-      'calc_volume',
-      'createdAt',
-      'updatedAt',
-      'isProhibited',
-      'status',
-      '[sizes.chrtID]',
-      '[sizes.techSize]',
-      '[sizes.wbSize]',
-      '[sizes.skus]',
-      'dt'
-    ];
+    // Определяем заголовки для Excel (убираем неиспользуемую переменную)
+    // const headers = [
+    //   'nmID',
+    //   'imtID', 
+    //   'vendorCode',
+    //   'brand',
+    //   'title',
+    //   'object',
+    //   'dimensions.length',
+    //   'dimensions.width', 
+    //   'dimensions.height',
+    //   'calc_volume',
+    //   'createdAt',
+    //   'updatedAt',
+    //   'isProhibited',
+    //   'status',
+    //   '[sizes.chrtID]',
+    //   '[sizes.techSize]',
+    //   '[sizes.wbSize]',
+    //   '[sizes.skus]',
+    //   'dt'
+    // ];
 
-    let allData: any[] = [];
-    let cursor: any = { limit: 100 };
+    const allData: Record<string, unknown>[] = [];
+    const cursor: Record<string, unknown> = { limit: 100 };
     let hasMore = true;
     let requestCount = 0;
     const maxRequests = 50; // Ограничение на количество запросов
@@ -162,7 +162,7 @@ export async function POST(request: Request) {
                           (card.dimensions?.height || 0) / 1000;
 
         // Базовая строка с данными карточки
-        const baseRow: any = {};
+        const baseRow: Record<string, unknown> = {};
         
         // Заполняем основные поля
         baseRow['nmID'] = card.nmID;

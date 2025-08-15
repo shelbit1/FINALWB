@@ -7,13 +7,39 @@ export default function Home() {
   const [token, setToken] = useState(
     "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjUwNTIwdjEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc2NjExMDk4NCwiaWQiOiIwMTk3ODg5Mi02M2U3LTczOWYtYTEyMC02MjU3ZGUxZmM1YjciLCJpaWQiOjI5MzkxMDIxLCJvaWQiOjU5NjI1LCJzIjoxMDczNzQ5NzU4LCJzaWQiOiJmMTEwN2UwOS1iMGNiLTVjYTctYTU0Mi03M2IxYzZhNjQ0N2UiLCJ0IjpmYWxzZSwidWlkIjoyOTM5MTAyMX0.sW33A2YFcxWhuVEilgGTSsSc2TASz1MyeLPN9G4x-lnSgM2yAu7O7QvZcomXbnNFZpUhsSA2LRj5YjMALs7xHw"
   );
+  
+  // Состояния для модального окна себестоимости
+  const [showCostModal, setShowCostModal] = useState(false);
+  const [groupedProducts, setGroupedProducts] = useState<any[]>([]);
+  const [skuCosts, setSkuCosts] = useState<{[sku: string]: string}>({});
+  const [bulkCost, setBulkCost] = useState<string>("");
+  const [isLoadingCosts, setIsLoadingCosts] = useState(false);
+
+  // Функции для работы с localStorage
+  const saveCostsToStorage = (costs: {[sku: string]: string}) => {
+    try {
+      localStorage.setItem('wb_sku_costs', JSON.stringify(costs));
+    } catch (error) {
+      console.error('Ошибка сохранения в localStorage:', error);
+    }
+  };
+
+  const loadCostsFromStorage = (): {[sku: string]: string} => {
+    try {
+      const stored = localStorage.getItem('wb_sku_costs');
+      return stored ? JSON.parse(stored) : {};
+    } catch (error) {
+      console.error('Ошибка загрузки из localStorage:', error);
+      return {};
+    }
+  };
   // Функция для получения последней полностью завершенной недели (понедельник-воскресенье)
   const getLastCompletedWeek = () => {
     const today = new Date();
     const dayOfWeek = today.getDay(); // 0 = воскресенье, 1 = понедельник, ..., 6 = суббота
     
     // Находим последнее воскресенье (конец недели)
-    let lastSunday = new Date(today);
+    const lastSunday = new Date(today);
     
     if (dayOfWeek === 0) {
       // Если сегодня воскресенье, берем вчерашнее воскресенье (неделю назад)
@@ -68,6 +94,222 @@ export default function Home() {
     setSelectedMonday(mondayDate);
     setPeriodA(mondayDate);
     setPeriodB(sunday.toISOString().split('T')[0]);
+  };
+
+  // Функция для загрузки и группировки товаров по артикулу
+  const handleLoadCosts = async () => {
+    try {
+      setIsLoadingCosts(true);
+      
+      if (!token.trim()) {
+        alert("Введите API токен Wildberries");
+        return;
+      }
+
+      console.log("📊 Загрузка номенклатуры для себестоимости...");
+      
+      const resNomenclature = await fetch("/api/wb/nomenclature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      if (!resNomenclature.ok) {
+        const err = await resNomenclature.json().catch(() => ({}));
+        throw new Error(err.error || `Ошибка загрузки номенклатуры: ${resNomenclature.status}`);
+      }
+
+      const nomenclature: { fields: string[]; rows: Record<string, unknown>[] } = await resNomenclature.json();
+      
+      // Группируем товары по артикулу продавца
+      const grouped = new Map<string, any>();
+      
+      nomenclature.rows.forEach((row: any) => {
+        const vendorCode = row["Артикул продавца"] || "Без артикула";
+        const skus = row["SKU"] || "";
+        
+        if (!grouped.has(vendorCode)) {
+          grouped.set(vendorCode, {
+            vendorCode,
+            brand: row["Бренд"] || "",
+            items: []
+          });
+        }
+        
+        // Разбиваем штрихкоды по символам ;\n если их несколько
+        const skuList = skus.split(';\n').filter((sku: string) => sku.trim() !== '');
+        
+        // Если штрихкодов нет, добавляем один элемент без SKU
+        if (skuList.length === 0) {
+          grouped.get(vendorCode)?.items.push({
+            nmId: row["ID товара"],
+            size: row["Технический размер"] || "",
+            sku: "",
+            title: row["Наименование"] || "",
+            uniqueKey: `${row["ID товара"]}_${row["Технический размер"]}_no_sku`
+          });
+        } else {
+          // Для каждого штрихкода создаем отдельный элемент
+          skuList.forEach((sku: string) => {
+            grouped.get(vendorCode)?.items.push({
+              nmId: row["ID товара"],
+              size: row["Технический размер"] || "",
+              sku: sku.trim(),
+              title: row["Наименование"] || "",
+              uniqueKey: `${row["ID товара"]}_${row["Технический размер"]}_${sku.trim()}`
+            });
+          });
+        }
+      });
+
+      // Преобразуем в массив и сортируем по артикулу
+      const groupedArray = Array.from(grouped.values())
+        .sort((a, b) => a.vendorCode.localeCompare(b.vendorCode));
+
+      setGroupedProducts(groupedArray);
+      
+      // Загружаем сохраненные данные себестоимости
+      const savedCosts = loadCostsFromStorage();
+      setSkuCosts(savedCosts);
+      
+      setShowCostModal(true);
+
+    } catch (error) {
+      console.error("Ошибка загрузки номенклатуры:", error);
+      alert((error as Error).message || "Не удалось загрузить номенклатуру");
+    } finally {
+      setIsLoadingCosts(false);
+    }
+  };
+
+  // Функция для массового применения себестоимости
+  const handleApplyBulkCost = () => {
+    if (!bulkCost.trim()) {
+      alert("Введите себестоимость для массового применения");
+      return;
+    }
+
+    const newSkuCosts: {[key: string]: string} = {};
+    
+    // Применяем к каждому SKU в каждой группе
+    groupedProducts.forEach(product => {
+      product.items.forEach((item: any) => {
+        const key = item.sku || item.uniqueKey;
+        newSkuCosts[key] = bulkCost;
+      });
+    });
+
+    setSkuCosts(newSkuCosts);
+    saveCostsToStorage(newSkuCosts); // Сохраняем в localStorage
+    setBulkCost(""); // Очищаем поле после применения
+    alert(`Себестоимость ${bulkCost} ₽ применена ко всем товарам`);
+  };
+
+  // Функция для очистки всех значений себестоимости
+  const handleClearAllCosts = () => {
+    if (confirm("Очистить все введенные значения себестоимости?")) {
+      setSkuCosts({});
+      setBulkCost("");
+      saveCostsToStorage({}); // Очищаем localStorage
+    }
+  };
+
+  // Функция для сохранения себестоимости
+  const handleSaveCosts = async () => {
+    try {
+      setIsLoadingCosts(true);
+      
+      // Загружаем номенклатуру заново с обновленными данными
+      const resNomenclature = await fetch("/api/wb/nomenclature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      if (!resNomenclature.ok) {
+        throw new Error("Не удалось загрузить номенклатуру");
+      }
+
+      const nomenclature: { fields: string[]; rows: Record<string, unknown>[] } = await resNomenclature.json();
+      
+      // Обновляем данные себестоимости
+      const updatedRows = nomenclature.rows.map((row: any) => {
+        const skus = row["SKU"] || "";
+        let cost = "";
+        
+        // Если есть штрихкоды, ищем себестоимость для первого найденного SKU
+        if (skus) {
+          const skuList = skus.split(';\n').filter((sku: string) => sku.trim() !== '');
+          for (const sku of skuList) {
+            const trimmedSku = sku.trim();
+            if (skuCosts[trimmedSku]) {
+              cost = skuCosts[trimmedSku];
+              break; // Берем первую найденную себестоимость для строки
+            }
+          }
+        }
+        
+        return {
+          ...row,
+          "Себестоимость": cost
+        };
+      });
+
+      // Создаем Excel файл только с листом "Номенклатура"
+      const nomenclatureHeader = nomenclature.fields;
+      const nomenclatureRowsData = updatedRows.map((row) => nomenclatureHeader.map((key) => row[key] ?? ""));
+      const nomenclatureSheet = XLSX.utils.aoa_to_sheet([nomenclatureHeader, ...nomenclatureRowsData]);
+      
+      // Устанавливаем ширину колонок
+      const nomenclatureColWidths = [
+        { wch: 12 }, // ID товара
+        { wch: 12 }, // ID предмета
+        { wch: 20 }, // Артикул продавца
+        { wch: 15 }, // Бренд
+        { wch: 30 }, // Наименование
+        { wch: 15 }, // Предмет
+        { wch: 12 }, // Длина (см)
+        { wch: 12 }, // Ширина (см)
+        { wch: 12 }, // Высота (см)
+        { wch: 12 }, // Объем (л)
+        { wch: 16 }, // Дата создания
+        { wch: 16 }, // Дата обновления
+        { wch: 10 }, // Запрещен
+        { wch: 8 },  // Статус
+        { wch: 15 }, // ID характеристики
+        { wch: 15 }, // Технический размер
+        { wch: 12 }, // Размер WB
+        { wch: 20 }, // SKU
+        { wch: 12 }, // Дата выгрузки
+        { wch: 15 }  // Себестоимость
+      ];
+      nomenclatureSheet["!cols"] = nomenclatureColWidths;
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, nomenclatureSheet, "Номенклатура");
+      
+      const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([arrayBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "Номенклатура_с_себестоимостью.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      
+      setShowCostModal(false);
+      alert("Файл с себестоимостью успешно сохранен!");
+      
+    } catch (error) {
+      console.error("Ошибка сохранения:", error);
+      alert((error as Error).message || "Не удалось сохранить файл");
+    } finally {
+      setIsLoadingCosts(false);
+    }
   };
 
   const handleDownload = async () => {
@@ -338,9 +580,34 @@ export default function Home() {
       }
 
       const workbook = XLSX.utils.book_new();
-      // Создаем лист номенклатуры
+      // Создаем лист номенклатуры с интеграцией сохраненной себестоимости
+      const savedCosts = loadCostsFromStorage();
+      
+      // Обновляем данные номенклатуры с себестоимостью
+      const updatedNomenclatureRows = nomenclature.rows.map((row: any) => {
+        const skus = row["SKU"] || "";
+        let cost = "";
+        
+        // Если есть штрихкоды, ищем себестоимость для первого найденного SKU
+        if (skus) {
+          const skuList = skus.split(';\n').filter((sku: string) => sku.trim() !== '');
+          for (const sku of skuList) {
+            const trimmedSku = sku.trim();
+            if (savedCosts[trimmedSku]) {
+              cost = savedCosts[trimmedSku];
+              break; // Берем первую найденную себестоимость для строки
+            }
+          }
+        }
+        
+        return {
+          ...row,
+          "Себестоимость": cost
+        };
+      });
+      
       const nomenclatureHeader = nomenclature.fields;
-      const nomenclatureRows = nomenclature.rows.map((row) => nomenclatureHeader.map((key) => row[key] ?? ""));
+      const nomenclatureRows = updatedNomenclatureRows.map((row) => nomenclatureHeader.map((key) => row[key] ?? ""));
       const nomenclatureSheet = XLSX.utils.aoa_to_sheet([nomenclatureHeader, ...nomenclatureRows]);
       
       // Устанавливаем ширину колонок для номенклатуры
@@ -371,10 +638,10 @@ export default function Home() {
       // Создаем лист "Аналитика" из номенклатуры, сгруппированный по артикулу
       const createProductsSheet = () => {
         // Группируем товары по артикулу продавца
-        const groupedProducts = new Map<string, any[]>();
+        const groupedProducts = new Map<string, Array<Record<string, unknown>>>();
         
-        nomenclature.rows.forEach((row: any) => {
-          const vendorCode = row["Артикул продавца"] || "Без артикула";
+        nomenclature.rows.forEach((row: Record<string, unknown>) => {
+          const vendorCode = String(row["Артикул продавца"] || "Без артикула");
           if (!groupedProducts.has(vendorCode)) {
             groupedProducts.set(vendorCode, []);
           }
@@ -393,13 +660,13 @@ export default function Home() {
         Array.from(groupedProducts.entries())
           .sort(([a], [b]) => a.localeCompare(b)) // Сортируем по артикулу
           .forEach(([vendorCode, products]) => {
-            products.forEach((product: any) => {
+            products.forEach((product: Record<string, unknown>) => {
               productsData.push([
                 vendorCode, // Артикул
-                product["Технический размер"] || "", // Размер - технический
-                product["SKU"] || "", // Штрихкод (используем SKU как штрихкод)
-                product["ID товара"] || "", // Артикул WB (nmID)
-                product["Бренд"] || "" // Бренд
+                String(product["Технический размер"] || ""), // Размер - технический
+                String(product["SKU"] || ""), // Штрихкод (используем SKU как штрихкод)
+                String(product["ID товара"] || ""), // Артикул WB (nmID)
+                String(product["Бренд"] || "") // Бренд
               ]);
             });
           });
@@ -549,9 +816,155 @@ export default function Home() {
                   "Скачать"
                 )}
               </button>
+              
+              <button
+                type="button"
+                onClick={handleLoadCosts}
+                disabled={isLoadingCosts}
+                className={`w-full h-11 rounded-lg bg-blue-600 text-white dark:bg-blue-500 dark:text-white font-medium transition-opacity ${
+                  isLoadingCosts ? "opacity-60 cursor-not-allowed" : "hover:opacity-90"
+                }`}
+              >
+                {isLoadingCosts ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-block h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    Загрузка...
+                  </span>
+                ) : (
+                  "Себестоимость"
+                )}
+              </button>
             </div>
           </div>
       </div>
+      
+      {/* Модальное окно для ввода себестоимости */}
+      {showCostModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Себестоимость товаров</h2>
+              <button
+                onClick={() => setShowCostModal(false)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Товары сгруппированы по артикулу. Введите себестоимость для каждого штрихкода отдельно.
+            </div>
+            
+            {/* Блок массового применения себестоимости */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-1">Массовое применение</h4>
+                  <p className="text-sm text-blue-700 dark:text-blue-300">Установить одинаковую себестоимость для всех товаров</p>
+                </div>
+                <div className="flex items-center gap-3 ml-4">
+                  <input
+                    type="number"
+                    placeholder="Себестоимость"
+                    value={bulkCost}
+                    onChange={(e) => setBulkCost(e.target.value)}
+                    className="w-32 h-9 rounded border border-blue-300 dark:border-blue-600 px-3 text-sm bg-white dark:bg-gray-700"
+                  />
+                  <span className="text-sm text-blue-600 dark:text-blue-400">₽</span>
+                  <button
+                    onClick={handleApplyBulkCost}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 transition-colors"
+                  >
+                    Применить ко всем
+                  </button>
+                  <button
+                    onClick={handleClearAllCosts}
+                    className="px-3 py-2 bg-gray-500 text-white text-sm font-medium rounded hover:bg-gray-600 transition-colors"
+                  >
+                    Очистить все
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto mb-4">
+              <div className="space-y-4">
+                {groupedProducts.map((product, index) => (
+                  <div key={index} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                    <div className="mb-4">
+                      <h3 className="font-medium text-lg">{product.vendorCode}</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Бренд: {product.brand}</p>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                        Штрихкоды товаров:
+                      </div>
+                      {product.items.map((item: any, itemIndex: number) => (
+                        <div key={itemIndex} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{item.title}</div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                              <span className="inline-block mr-3">Размер: <span className="font-medium">{item.size || "—"}</span></span>
+                              <span className="inline-block mr-3">ШК: <span className="font-medium">{item.sku || "Нет ШК"}</span></span>
+                              <span className="inline-block">WB: <span className="font-medium">{item.nmId}</span></span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 ml-4">
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={skuCosts[item.sku || item.uniqueKey] || ""}
+                              onChange={(e) => {
+                                const newCosts = {
+                                  ...skuCosts,
+                                  [item.sku || item.uniqueKey]: e.target.value
+                                };
+                                setSkuCosts(newCosts);
+                                saveCostsToStorage(newCosts); // Сохраняем при каждом изменении
+                              }}
+                              className="w-24 h-8 rounded border border-gray-300 dark:border-gray-600 px-2 text-sm bg-white dark:bg-gray-700 text-right"
+                            />
+                            <span className="text-xs text-gray-500">₽</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-600">
+              <button
+                onClick={() => setShowCostModal(false)}
+                className="flex-1 h-11 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleSaveCosts}
+                disabled={isLoadingCosts}
+                className={`flex-1 h-11 rounded-lg bg-green-600 text-white font-medium transition-opacity ${
+                  isLoadingCosts ? "opacity-60 cursor-not-allowed" : "hover:opacity-90"
+                }`}
+              >
+                {isLoadingCosts ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-block h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    Сохранение...
+                  </span>
+                ) : (
+                  "Сохранить файл"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

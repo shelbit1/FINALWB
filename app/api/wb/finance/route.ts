@@ -76,7 +76,7 @@ export async function POST(request: Request) {
         };
         
         for (const key of FIELD_ORDER) {
-          ordered[key] = (rowData as any)[key] ?? "";
+          ordered[key] = (rowData as Record<string, unknown>)[key] ?? "";
         }
         
         return ordered;

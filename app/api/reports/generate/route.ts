@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     // Подготавливаем данные для Excel (как у конкурента)
     const reportPeriod = `${new Date(startDate).toLocaleDateString('ru-RU')} - ${new Date(endDate).toLocaleDateString('ru-RU')}`;
     
-    const excelData = financialData.map((record, index) => [
+    const excelData = financialData.map((record) => [
       record.advertId,
       record.campName || 'Неизвестная кампания',
       record.date,
