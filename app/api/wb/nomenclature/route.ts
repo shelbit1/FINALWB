@@ -26,11 +26,11 @@ interface NomenclatureCard {
   createdAt: string;
   updatedAt: string;
   isProhibited: boolean;
-  photos: any[];
+  photos: Record<string, unknown>[];
   video: string;
   status: number;
-  tags: any[];
-  characteristics: any[];
+  tags: Record<string, unknown>[];
+  characteristics: Record<string, unknown>[];
 }
 
 interface NomenclatureResponse {

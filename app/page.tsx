@@ -10,7 +10,7 @@ export default function Home() {
   
   // Состояния для модального окна себестоимости
   const [showCostModal, setShowCostModal] = useState(false);
-  const [groupedProducts, setGroupedProducts] = useState<any[]>([]);
+  const [groupedProducts, setGroupedProducts] = useState<Array<{vendorCode: string; brand: string; items: Array<Record<string, unknown>>}>>([]);
   const [skuCosts, setSkuCosts] = useState<{[sku: string]: string}>({});
   const [bulkCost, setBulkCost] = useState<string>("");
   const [isLoadingCosts, setIsLoadingCosts] = useState(false);
@@ -122,16 +122,16 @@ export default function Home() {
       const nomenclature: { fields: string[]; rows: Record<string, unknown>[] } = await resNomenclature.json();
       
       // Группируем товары по артикулу продавца
-      const grouped = new Map<string, any>();
+      const grouped = new Map<string, {vendorCode: string; brand: string; items: Array<Record<string, unknown>>}>();
       
-      nomenclature.rows.forEach((row: any) => {
-        const vendorCode = row["Артикул продавца"] || "Без артикула";
-        const skus = row["SKU"] || "";
+      nomenclature.rows.forEach((row: Record<string, unknown>) => {
+        const vendorCode = String(row["Артикул продавца"] || "Без артикула");
+        const skus = String(row["SKU"] || "");
         
         if (!grouped.has(vendorCode)) {
           grouped.set(vendorCode, {
             vendorCode,
-            brand: row["Бренд"] || "",
+            brand: String(row["Бренд"] || ""),
             items: []
           });
         }
@@ -142,20 +142,20 @@ export default function Home() {
         // Если штрихкодов нет, добавляем один элемент без SKU
         if (skuList.length === 0) {
           grouped.get(vendorCode)?.items.push({
-            nmId: row["ID товара"],
-            size: row["Технический размер"] || "",
+            nmId: String(row["ID товара"] || ""),
+            size: String(row["Технический размер"] || ""),
             sku: "",
-            title: row["Наименование"] || "",
+            title: String(row["Наименование"] || ""),
             uniqueKey: `${row["ID товара"]}_${row["Технический размер"]}_no_sku`
           });
         } else {
           // Для каждого штрихкода создаем отдельный элемент
           skuList.forEach((sku: string) => {
             grouped.get(vendorCode)?.items.push({
-              nmId: row["ID товара"],
-              size: row["Технический размер"] || "",
+              nmId: String(row["ID товара"] || ""),
+              size: String(row["Технический размер"] || ""),
               sku: sku.trim(),
-              title: row["Наименование"] || "",
+              title: String(row["Наименование"] || ""),
               uniqueKey: `${row["ID товара"]}_${row["Технический размер"]}_${sku.trim()}`
             });
           });
@@ -193,8 +193,8 @@ export default function Home() {
     
     // Применяем к каждому SKU в каждой группе
     groupedProducts.forEach(product => {
-      product.items.forEach((item: any) => {
-        const key = item.sku || item.uniqueKey;
+      product.items.forEach((item: Record<string, unknown>) => {
+        const key = String(item.sku || item.uniqueKey);
         newSkuCosts[key] = bulkCost;
       });
     });
@@ -233,8 +233,8 @@ export default function Home() {
       const nomenclature: { fields: string[]; rows: Record<string, unknown>[] } = await resNomenclature.json();
       
       // Обновляем данные себестоимости
-      const updatedRows = nomenclature.rows.map((row: any) => {
-        const skus = row["SKU"] || "";
+      const updatedRows = nomenclature.rows.map((row: Record<string, unknown>) => {
+        const skus = String(row["SKU"] || "");
         let cost = "";
         
         // Если есть штрихкоды, ищем себестоимость для первого найденного SKU
@@ -257,7 +257,7 @@ export default function Home() {
 
       // Создаем Excel файл только с листом "Номенклатура"
       const nomenclatureHeader = nomenclature.fields;
-      const nomenclatureRowsData = updatedRows.map((row) => nomenclatureHeader.map((key) => row[key] ?? ""));
+      const nomenclatureRowsData = updatedRows.map((row) => nomenclatureHeader.map((key) => (row as Record<string, unknown>)[key] ?? ""));
       const nomenclatureSheet = XLSX.utils.aoa_to_sheet([nomenclatureHeader, ...nomenclatureRowsData]);
       
       // Устанавливаем ширину колонок
@@ -584,8 +584,8 @@ export default function Home() {
       const savedCosts = loadCostsFromStorage();
       
       // Обновляем данные номенклатуры с себестоимостью
-      const updatedNomenclatureRows = nomenclature.rows.map((row: any) => {
-        const skus = row["SKU"] || "";
+      const updatedNomenclatureRows = nomenclature.rows.map((row: Record<string, unknown>) => {
+        const skus = String(row["SKU"] || "");
         let cost = "";
         
         // Если есть штрихкоды, ищем себестоимость для первого найденного SKU
@@ -607,7 +607,7 @@ export default function Home() {
       });
       
       const nomenclatureHeader = nomenclature.fields;
-      const nomenclatureRows = updatedNomenclatureRows.map((row) => nomenclatureHeader.map((key) => row[key] ?? ""));
+      const nomenclatureRows = updatedNomenclatureRows.map((row) => nomenclatureHeader.map((key) => (row as Record<string, unknown>)[key] ?? ""));
       const nomenclatureSheet = XLSX.utils.aoa_to_sheet([nomenclatureHeader, ...nomenclatureRows]);
       
       // Устанавливаем ширину колонок для номенклатуры
@@ -903,25 +903,25 @@ export default function Home() {
                       <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                         Штрихкоды товаров:
                       </div>
-                      {product.items.map((item: any, itemIndex: number) => (
+                      {product.items.map((item: Record<string, unknown>, itemIndex: number) => (
                         <div key={itemIndex} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{item.title}</div>
+                            <div className="font-medium text-sm truncate">{String(item.title || "")}</div>
                             <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                              <span className="inline-block mr-3">Размер: <span className="font-medium">{item.size || "—"}</span></span>
-                              <span className="inline-block mr-3">ШК: <span className="font-medium">{item.sku || "Нет ШК"}</span></span>
-                              <span className="inline-block">WB: <span className="font-medium">{item.nmId}</span></span>
+                              <span className="inline-block mr-3">Размер: <span className="font-medium">{String(item.size || "—")}</span></span>
+                              <span className="inline-block mr-3">ШК: <span className="font-medium">{String(item.sku || "Нет ШК")}</span></span>
+                              <span className="inline-block">WB: <span className="font-medium">{String(item.nmId || "")}</span></span>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 ml-4">
                             <input
                               type="number"
                               placeholder="0"
-                              value={skuCosts[item.sku || item.uniqueKey] || ""}
+                              value={skuCosts[String(item.sku || item.uniqueKey)] || ""}
                               onChange={(e) => {
                                 const newCosts = {
                                   ...skuCosts,
-                                  [item.sku || item.uniqueKey]: e.target.value
+                                  [String(item.sku || item.uniqueKey)]: e.target.value
                                 };
                                 setSkuCosts(newCosts);
                                 saveCostsToStorage(newCosts); // Сохраняем при каждом изменении
