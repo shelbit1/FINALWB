@@ -352,7 +352,7 @@ export default function Home() {
 
       console.log("Отправляем запросы к API...", payload);
 
-      let resReport, resPaid, resAcceptance, resFinanceRK, resNomenclature;
+      let resReport, resPaid, resAcceptance, resFinanceRK, resNomenclature, resWarehouseRemains;
       
       try {
         // Делаем запросы не все сразу, а с небольшими задержками для соблюдения лимитов API
@@ -478,6 +478,40 @@ export default function Home() {
             })
           };
         });
+
+        // Задержка перед остатками на складах (лимит 1 запрос в минуту)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log("📊 Запуск отчета остатков на складах...");
+        resWarehouseRemains = await fetch("/api/wb/warehouse-remains", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        }).catch(err => {
+          console.error("Ошибка fetch для остатков на складах:", err);
+          // Возвращаем пустые данные вместо ошибки
+          return {
+            ok: true,
+            json: async () => ({
+              fields: [
+                "Бренд",
+                "Предмет",
+                "Артикул продавца",
+                "Артикул WB",
+                "Штрихкод",
+                "Размер",
+                "Объем (л)",
+                "Название склада",
+                "ID склада",
+                "Количество",
+                "В пути к клиенту",
+                "В пути от клиента",
+                "Дата выгрузки"
+              ],
+              rows: []
+            })
+          };
+        });
       } catch (fetchError) {
         console.error("Promise.all fetch error:", fetchError);
         throw fetchError;
@@ -488,7 +522,8 @@ export default function Home() {
         paidStatus: resPaid.status,
         acceptanceStatus: resAcceptance.ok ? 'success' : 'fallback',
         financeRKStatus: resFinanceRK.ok ? 'success' : 'fallback',
-        nomenclatureStatus: resNomenclature.ok ? 'success' : 'fallback'
+        nomenclatureStatus: resNomenclature.ok ? 'success' : 'fallback',
+        warehouseRemainsStatus: resWarehouseRemains.ok ? 'success' : 'fallback'
       });
 
       if (!resReport.ok) {
@@ -506,6 +541,7 @@ export default function Home() {
       const acceptance: { fields: string[]; rows: Record<string, unknown>[] } = await resAcceptance.json();
       const financeRK: { fields: string[]; rows: Record<string, unknown>[] } = await resFinanceRK.json();
       const nomenclature: { fields: string[]; rows: Record<string, unknown>[] } = await resNomenclature.json();
+      const warehouseRemains: { fields: string[]; rows: Record<string, unknown>[] } = await resWarehouseRemains.json();
 
       // Сопоставляем номера отчетов из еженедельного отчета с платной приемкой
       // ВАЖНО: данные платной приемки уже отфильтрованы по "Дата создания ШК" (период -1 день)
@@ -561,6 +597,29 @@ export default function Home() {
       });
       
       const financeRKSheet = XLSX.utils.aoa_to_sheet([financeRKHeader, ...financeRKRows]);
+
+      // Создаем лист "Остатки"
+      const warehouseRemainsHeader = warehouseRemains.fields;
+      const warehouseRemainsRows = warehouseRemains.rows.map((row) => warehouseRemainsHeader.map((key) => row[key] ?? ""));
+      const warehouseRemainsSheet = XLSX.utils.aoa_to_sheet([warehouseRemainsHeader, ...warehouseRemainsRows]);
+      
+      // Устанавливаем ширину колонок для листа "Остатки"
+      const warehouseRemainsColWidths = [
+        { wch: 15 }, // Бренд
+        { wch: 20 }, // Предмет
+        { wch: 20 }, // Артикул продавца
+        { wch: 12 }, // Артикул WB
+        { wch: 20 }, // Штрихкод
+        { wch: 10 }, // Размер
+        { wch: 12 }, // Объем (л)
+        { wch: 25 }, // Название склада
+        { wch: 10 }, // ID склада
+        { wch: 12 }, // Количество
+        { wch: 15 }, // В пути к клиенту
+        { wch: 15 }, // В пути от клиента
+        { wch: 15 }  // Дата выгрузки
+      ];
+      warehouseRemainsSheet["!cols"] = warehouseRemainsColWidths;
 
       // Применяем российское форматирование чисел для колонки "Сумма"
       if (financeRKRows.length > 0) {
@@ -690,6 +749,7 @@ export default function Home() {
       XLSX.utils.book_append_sheet(workbook, paidSheet, "Платное хранение");
       XLSX.utils.book_append_sheet(workbook, acceptanceSheet, "Платная приемка");
       XLSX.utils.book_append_sheet(workbook, financeRKSheet, "Финансы РК");
+      XLSX.utils.book_append_sheet(workbook, warehouseRemainsSheet, "Остатки");
       XLSX.utils.book_append_sheet(workbook, nomenclatureSheet, "Номенклатура");
       const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
       const blob = new Blob([arrayBuffer], {
