@@ -70,6 +70,18 @@ export default function Home() {
   const [periodB, setPeriodB] = useState(getDefaultWeek.sunday);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
 
+  // Состояния для РНП (один день)
+  const [rnpDate, setRnpDate] = useState("");
+  const [isLoadingRnp, setIsLoadingRnp] = useState(false);
+  const [isLoadingRemains, setIsLoadingRemains] = useState(false);
+  const [isLoadingRemainsRnp, setIsLoadingRemainsRnp] = useState(false);
+  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
+  
+  // Состояния для параметров остатков
+  const [deliveryDays, setDeliveryDays] = useState("");
+  const [stockDays, setStockDays] = useState("");
+  const [coefficient, setCoefficient] = useState("");
+
   // Функция для обработки выбора понедельника
   const handleMondayChange = (mondayDate: string) => {
     const monday = new Date(mondayDate);
@@ -309,6 +321,1081 @@ export default function Home() {
       alert((error as Error).message || "Не удалось сохранить файл");
     } finally {
       setIsLoadingCosts(false);
+    }
+  };
+
+  // Функция для скачивания РНП с полным набором листов
+  const handleRnpDownload = async () => {
+    try {
+      setIsLoadingRnp(true);
+      
+      // Валидация данных
+      if (!token.trim()) {
+        alert("Введите API токен Wildberries");
+        return;
+      }
+      
+      if (!rnpDate) {
+        alert("Выберите дату для выгрузки РНП");
+        return;
+      }
+      
+      const selectedDate = new Date(rnpDate);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      
+      if (selectedDate > today) {
+        alert("Дата не может быть в будущем");
+        return;
+      }
+      
+      // Используем одну и ту же дату для начала и конца периода
+      const payload = { token, dateFrom: rnpDate, dateTo: rnpDate };
+
+      console.log("📊 Запуск расширенного отчета РНП с дополнительными листами...", payload);
+
+      let resRnp, resPaid, resAcceptance, resFinanceRK, resNomenclature, resWarehouseRemains;
+      
+      try {
+        // Основной РНП отчет
+        console.log("📊 Запуск РНП (ежедневные отчеты)...");
+        resRnp = await fetch("/api/wb/rnp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(err => {
+          console.error("Ошибка fetch для РНП:", err);
+          throw new Error(`Ошибка сетевого запроса для РНП: ${err.message}`);
+        });
+
+        // Небольшая задержка перед следующим запросом
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log("📊 Запуск отчета платного хранения...");
+        resPaid = await fetch("/api/wb/paid-storage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(err => {
+          console.error("Ошибка fetch для платного хранения:", err);
+          throw new Error(`Ошибка сетевого запроса для платного хранения: ${err.message}`);
+        });
+
+        // Задержка перед запросом платной приемки (у неё лимит 1 запрос в минуту)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log("📊 Запуск отчета платной приемки...");
+        resAcceptance = await fetch("/api/wb/acceptance-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(err => {
+          console.error("Ошибка fetch для платной приемки:", err);
+          // Возвращаем пустые данные вместо ошибки
+          return {
+            ok: true,
+            json: async () => ({
+              fields: [
+                'Кол-во',
+                'Дата создания GI',
+                'Income ID',
+                'Артикул WB',
+                'Дата создания ШК',
+                'Предмет',
+                'Сумма (руб)',
+                'Дата отчета',
+                'Номер отчета'
+              ],
+              rows: []
+            })
+          };
+        });
+
+        // Задержка перед финансами РК
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log("📊 Запуск отчета финансов РК...");
+        resFinanceRK = await fetch("/api/reports/finance-rk-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, startDate: rnpDate, endDate: rnpDate }),
+        }).catch(err => {
+          console.error("Ошибка fetch для финансов РК:", err);
+          // Возвращаем пустые данные вместо ошибки
+          return {
+            ok: true,
+            json: async () => ({
+              fields: [
+                'ID кампании',
+                'Название кампании', 
+                'Дата',
+                'Сумма',
+                'Источник списания',
+                'Тип операции',
+                'Номер документа',
+                'SKU ID',
+                'Период отчета'
+              ],
+              rows: []
+            })
+          };
+        });
+
+        // Задержка перед номенклатурой
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log("📊 Запуск отчета номенклатуры...");
+        resNomenclature = await fetch("/api/wb/nomenclature", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        }).catch(err => {
+          console.error("Ошибка fetch для номенклатуры:", err);
+          // Возвращаем пустые данные вместо ошибки
+          return {
+            ok: true,
+            json: async () => ({
+              fields: [
+                "ID товара",
+                "ID предмета", 
+                "Артикул продавца",
+                "Бренд",
+                "Наименование",
+                "Предмет",
+                "Длина (см)",
+                "Ширина (см)",
+                "Высота (см)",
+                "Объем (л)",
+                "Дата создания",
+                "Дата обновления",
+                "Запрещен",
+                "Статус",
+                "ID характеристики",
+                "Технический размер",
+                "Размер WB",
+                "SKU",
+                "Дата выгрузки",
+                "Себестоимость"
+              ],
+              rows: []
+            })
+          };
+        });
+
+        // Задержка перед остатками на складах (лимит 1 запрос в минуту)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log("📊 Запуск отчета остатков на складах...");
+        resWarehouseRemains = await fetch("/api/wb/warehouse-remains", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        }).catch(err => {
+          console.error("Ошибка fetch для остатков на складах:", err);
+          // Возвращаем пустые данные вместо ошибки
+          return {
+            ok: true,
+            json: async () => ({
+              fields: [
+                "Бренд",
+                "Предмет",
+                "Артикул продавца",
+                "Артикул WB",
+                "Штрихкод",
+                "Размер",
+                "Объем (л)",
+                "Название склада",
+                "ID склада",
+                "Количество",
+                "В пути к клиенту",
+                "В пути от клиента",
+                "Дата выгрузки"
+              ],
+              rows: []
+            })
+          };
+        });
+      } catch (fetchError) {
+        console.error("Promise.all fetch error:", fetchError);
+        throw fetchError;
+      }
+
+      console.log("Получены ответы:", { 
+        rnpStatus: resRnp.status, 
+        paidStatus: resPaid.status,
+        acceptanceStatus: resAcceptance.ok ? 'success' : 'fallback',
+        financeRKStatus: resFinanceRK.ok ? 'success' : 'fallback',
+        nomenclatureStatus: resNomenclature.ok ? 'success' : 'fallback',
+        warehouseRemainsStatus: resWarehouseRemains.ok ? 'success' : 'fallback'
+      });
+
+      if (!resRnp.ok) {
+        const err = await resRnp.json().catch(() => ({}));
+        throw new Error(err.error || `Ошибка РНП: ${resRnp.status}`);
+      }
+      if (!resPaid.ok) {
+        const err = await resPaid.json().catch(() => ({}));
+        throw new Error(err.error || `Ошибка платного хранения: ${resPaid.status}`);
+      }
+
+      const rnp: { fields: string[]; rows: Record<string, unknown>[] } = await resRnp.json();
+      const paid: { fields: string[]; rows: Record<string, unknown>[] } = await resPaid.json();
+      const acceptance: { fields: string[]; rows: Record<string, unknown>[] } = await resAcceptance.json();
+      const financeRK: { fields: string[]; rows: Record<string, unknown>[] } = await resFinanceRK.json();
+      const nomenclature: { fields: string[]; rows: Record<string, unknown>[] } = await resNomenclature.json();
+      const warehouseRemains: { fields: string[]; rows: Record<string, unknown>[] } = await resWarehouseRemains.json();
+
+      // Создаем Excel файл с множественными листами
+      const workbook = XLSX.utils.book_new();
+
+      // Лист РНП (основной)
+      const rnpHeader = rnp.fields;
+      const rnpRows = rnp.rows.map((row) => rnpHeader.map((key) => row[key] ?? ""));
+      const rnpSheet = XLSX.utils.aoa_to_sheet([rnpHeader, ...rnpRows]);
+      
+      // Устанавливаем ширину колонок для РНП (сокращенные для экономии места)
+      const rnpColWidths = Array(rnpHeader.length).fill({ wch: 12 });
+      rnpSheet["!cols"] = rnpColWidths;
+
+      // Лист платного хранения
+      const paidHeader = paid.fields;
+      const paidRows = paid.rows.map((row) => paidHeader.map((key) => row[key] ?? ""));
+      const paidSheet = XLSX.utils.aoa_to_sheet([paidHeader, ...paidRows]);
+
+      // Лист платной приемки
+      const acceptanceHeader = acceptance.fields;
+      const acceptanceRows = acceptance.rows.map((row) => acceptanceHeader.map((key) => row[key] ?? ""));
+      const acceptanceSheet = XLSX.utils.aoa_to_sheet([acceptanceHeader, ...acceptanceRows]);
+
+      // Лист финансов РК
+      const financeRKHeader = financeRK.fields;
+      const financeRKRows = financeRK.rows.map((row) => {
+        return financeRKHeader.map((key) => {
+          const value = row[key] ?? "";
+          // Специальная обработка для колонки "Сумма" - сохраняем как число
+          if (key === 'Сумма') {
+            if (typeof value === 'number') {
+              return value;
+            } else if (typeof value === 'string') {
+              const numValue = parseFloat(String(value).replace(/[^\d.]/g, ''));
+              return isNaN(numValue) ? 0 : numValue;
+            }
+            return 0;
+          }
+          return value;
+        });
+      });
+      const financeRKSheet = XLSX.utils.aoa_to_sheet([financeRKHeader, ...financeRKRows]);
+
+      // Лист остатков на складах
+      const warehouseRemainsHeader = warehouseRemains.fields;
+      const warehouseRemainsRows = warehouseRemains.rows.map((row) => warehouseRemainsHeader.map((key) => row[key] ?? ""));
+      const warehouseRemainsSheet = XLSX.utils.aoa_to_sheet([warehouseRemainsHeader, ...warehouseRemainsRows]);
+
+      // Лист номенклатуры с интеграцией сохраненной себестоимости
+      const savedCosts = loadCostsFromStorage();
+      
+      const updatedNomenclatureRows = nomenclature.rows.map((row: Record<string, unknown>) => {
+        const skus = String(row["SKU"] || "");
+        let cost = "";
+        
+        if (skus) {
+          const skuList = skus.split(';\n').filter((sku: string) => sku.trim() !== '');
+          for (const sku of skuList) {
+            const trimmedSku = sku.trim();
+            if (savedCosts[trimmedSku]) {
+              cost = savedCosts[trimmedSku];
+              break;
+            }
+          }
+        }
+        
+        return {
+          ...row,
+          "Себестоимость": cost
+        };
+      });
+      
+      // Убеждаемся, что поле "Себестоимость" включено в заголовки для РНП
+      const nomenclatureHeader = nomenclature.fields.includes("Себестоимость") 
+        ? nomenclature.fields 
+        : [...nomenclature.fields, "Себестоимость"];
+      
+      const nomenclatureRows = updatedNomenclatureRows.map((row) => nomenclatureHeader.map((key) => (row as Record<string, unknown>)[key] ?? ""));
+      const nomenclatureSheet = XLSX.utils.aoa_to_sheet([nomenclatureHeader, ...nomenclatureRows]);
+      
+      // Устанавливаем ширину колонок для номенклатуры в РНП
+      const nomenclatureColWidths = [
+        { wch: 12 }, // ID товара
+        { wch: 12 }, // ID предмета
+        { wch: 20 }, // Артикул продавца
+        { wch: 15 }, // Бренд
+        { wch: 30 }, // Наименование
+        { wch: 15 }, // Предмет
+        { wch: 12 }, // Длина (см)
+        { wch: 12 }, // Ширина (см)
+        { wch: 12 }, // Высота (см)
+        { wch: 12 }, // Объем (л)
+        { wch: 16 }, // Дата создания
+        { wch: 16 }, // Дата обновления
+        { wch: 10 }, // Запрещен
+        { wch: 8 },  // Статус
+        { wch: 15 }, // ID характеристики
+        { wch: 15 }, // Технический размер
+        { wch: 12 }, // Размер WB
+        { wch: 20 }, // SKU
+        { wch: 12 }, // Дата выгрузки
+        { wch: 15 }  // Себестоимость
+      ];
+      nomenclatureSheet["!cols"] = nomenclatureColWidths;
+
+      // Создаем лист "Аналитика по товарам" из номенклатуры, сгруппированный по артикулу
+      const createProductAnalyticsSheet = () => {
+        // Группируем товары по артикулу продавца
+        const groupedProducts = new Map<string, Array<Record<string, unknown>>>();
+        
+        nomenclature.rows.forEach((row: Record<string, unknown>) => {
+          const vendorCode = String(row["Артикул продавца"] || "Без артикула");
+          if (!groupedProducts.has(vendorCode)) {
+            groupedProducts.set(vendorCode, []);
+          }
+          groupedProducts.get(vendorCode)?.push(row);
+        });
+
+        // Создаем заголовки для листа "Аналитика по товарам" с пустыми строками сверху
+        const analyticsHeaders = ["Артикул", "Размер", "Штрихкод", "Артикул WB", "Бренд"];
+        const analyticsData = [
+          [], // Пустая строка 1
+          [], // Пустая строка 2
+          analyticsHeaders // Заголовки в строке 3
+        ];
+
+        // Добавляем данные, сгруппированные по артикулу
+        Array.from(groupedProducts.entries())
+          .sort(([a], [b]) => a.localeCompare(b)) // Сортируем по артикулу
+          .forEach(([vendorCode, products]) => {
+            products.forEach((product: Record<string, unknown>) => {
+              analyticsData.push([
+                vendorCode, // Артикул
+                String(product["Технический размер"] || ""), // Размер - технический
+                String(product["SKU"] || ""), // Штрихкод (используем SKU как штрихкод)
+                String(product["ID товара"] || ""), // Артикул WB (nmID)
+                String(product["Бренд"] || "") // Бренд
+              ]);
+            });
+          });
+
+        return XLSX.utils.aoa_to_sheet(analyticsData);
+      };
+
+      const productAnalyticsSheet = createProductAnalyticsSheet();
+      
+      // Устанавливаем ширину колонок для листа "Аналитика по товарам"
+      productAnalyticsSheet["!cols"] = [
+        { wch: 20 }, // Артикул
+        { wch: 15 }, // Размер
+        { wch: 25 }, // Штрихкод
+        { wch: 15 }, // Артикул WB
+        { wch: 20 }  // Бренд
+      ];
+
+      // Добавляем все листы в книгу (Аналитика по товарам идет первой)
+      XLSX.utils.book_append_sheet(workbook, productAnalyticsSheet, "Аналитика по товарам");
+      XLSX.utils.book_append_sheet(workbook, rnpSheet, "РНП");
+      XLSX.utils.book_append_sheet(workbook, paidSheet, "Платное хранение");
+      XLSX.utils.book_append_sheet(workbook, acceptanceSheet, "Платная приемка");
+      XLSX.utils.book_append_sheet(workbook, financeRKSheet, "Финансы РК");
+      XLSX.utils.book_append_sheet(workbook, warehouseRemainsSheet, "Остатки");
+      XLSX.utils.book_append_sheet(workbook, nomenclatureSheet, "Номенклатура");
+      
+      const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([arrayBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `РНП_Полный_${rnpDate}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      
+    } catch (error) {
+      console.error("Ошибка РНП:", error);
+      const errorMessage = (error as Error).message || "Не удалось сформировать РНП";
+      
+      // Более понятные сообщения об ошибках для РНП
+      let userFriendlyMessage = errorMessage;
+      if (errorMessage.includes("401") || errorMessage.includes("Unauthorized")) {
+        userFriendlyMessage = "Ошибка авторизации: проверьте корректность API токена Wildberries";
+      } else if (errorMessage.includes("403") || errorMessage.includes("Forbidden")) {
+        userFriendlyMessage = "Доступ запрещен: убедитесь, что у токена есть необходимые права доступа";
+      } else if (errorMessage.includes("429") || errorMessage.includes("Too Many Requests")) {
+        userFriendlyMessage = "Превышен лимит запросов к API Wildberries. Подождите 1-2 минуты перед повторной попыткой";
+      } else if (errorMessage.includes("500") || errorMessage.includes("Internal Server Error")) {
+        userFriendlyMessage = "Внутренняя ошибка сервера Wildberries. Попробуйте позже";
+      }
+      
+      alert(userFriendlyMessage);
+    } finally {
+      setIsLoadingRnp(false);
+    }
+  };
+
+  const handleRemainsDownload = async () => {
+    try {
+      setIsLoadingRemains(true);
+      
+      // Валидация токена
+      if (!token.trim()) {
+        alert("Введите API токен Wildberries");
+        return;
+      }
+      
+      console.log("📊 Запуск отчета остатков на складах...");
+      
+      // Запрос остатков на складах
+      const resWarehouseRemains = await fetch("/api/wb/warehouse-remains", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      if (!resWarehouseRemains.ok) {
+        const errorData = await resWarehouseRemains.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении остатков на складах");
+      }
+
+      const warehouseRemains = await resWarehouseRemains.json();
+      console.log("✅ Остатки на складах получены:", warehouseRemains.rows?.length || 0, "строк");
+
+      // Создание Excel файла
+      const workbook = XLSX.utils.book_new();
+      
+      // Добавляем лист "Остатки"
+      const remainsHeader = warehouseRemains.fields || [];
+      const remainsRows = (warehouseRemains.rows || []).map((row: Record<string, unknown>) => 
+        remainsHeader.map((key: string) => row[key] ?? "")
+      );
+      const remainsSheet = XLSX.utils.aoa_to_sheet([remainsHeader, ...remainsRows]);
+      
+      // Настройка ширины колонок для остатков
+      const remainsColWidths = [
+        { wch: 20 }, // Бренд
+        { wch: 20 }, // Предмет
+        { wch: 20 }, // Артикул продавца
+        { wch: 12 }, // Артикул WB
+        { wch: 15 }, // Штрихкод
+        { wch: 10 }, // Размер
+        { wch: 10 }, // Объем (л)
+        { wch: 25 }, // Название склада
+        { wch: 12 }, // ID склада
+        { wch: 12 }, // Количество
+        { wch: 15 }, // В пути к клиенту
+        { wch: 15 }, // В пути от клиента
+        { wch: 12 }  // Дата выгрузки
+      ];
+      remainsSheet["!cols"] = remainsColWidths;
+
+      XLSX.utils.book_append_sheet(workbook, remainsSheet, "Остатки");
+
+      // Генерация и скачивание файла
+      const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([excelBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      const currentDate = new Date().toISOString().split('T')[0];
+      link.download = `Остатки_на_складах_${currentDate}.xlsx`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      console.log("✅ Файл остатков успешно скачан");
+    } catch (error) {
+      console.error("❌ Ошибка при скачивании остатков:", error);
+      
+      let userFriendlyMessage = "Произошла ошибка при загрузке остатков";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
+          userFriendlyMessage = "Ошибка сети. Проверьте подключение к интернету";
+        } else if (error.message.includes("401") || error.message.includes("авторизац")) {
+          userFriendlyMessage = "Ошибка авторизации. Проверьте правильность токена";
+        } else if (error.message.includes("429")) {
+          userFriendlyMessage = "Превышен лимит запросов. Попробуйте через минуту";
+        } else if (error.message.includes("500")) {
+          userFriendlyMessage = "Внутренняя ошибка сервера Wildberries. Попробуйте позже";
+        } else {
+          userFriendlyMessage = error.message;
+        }
+      }
+      
+      alert(userFriendlyMessage);
+    } finally {
+      setIsLoadingRemains(false);
+    }
+  };
+
+  const handleRemainsRnpDownload = async () => {
+    try {
+      setIsLoadingRemainsRnp(true);
+      
+      // Валидация токена
+      if (!token.trim()) {
+        alert("Введите API токен Wildberries");
+        return;
+      }
+      
+      // Валидация полей срока поставки и запаса
+      const delivery = parseFloat(deliveryDays);
+      const stock = parseFloat(stockDays);
+      
+      if (!deliveryDays || isNaN(delivery) || delivery <= 0) {
+        alert("Введите корректный срок поставки (больше 0)");
+        return;
+      }
+      
+      if (!stockDays || isNaN(stock) || stock <= 0) {
+        alert("Введите корректный запас (больше 0)");
+        return;
+      }
+      
+      // Рассчитываем период: (Срок поставки + Запас) дней, заканчивая вчерашним днем
+      const totalDays = Math.ceil(delivery + stock); // Округляем вверх для дробных значений
+      
+      // Вчерашний день (конец периода)
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+      
+      // Начало периода (вчера минус totalDays дней)
+      const startDate = new Date(yesterday);
+      startDate.setDate(yesterday.getDate() - totalDays + 1); // +1 потому что включаем вчерашний день
+      
+      const dateFrom = startDate.toISOString().split('T')[0];
+      const dateTo = yesterday.toISOString().split('T')[0];
+      
+      console.log(`📊 Запуск РНП за период ${totalDays} дней: ${dateFrom} - ${dateTo}`);
+      
+      const payload = { token, dateFrom, dateTo };
+      
+      // Запрос РНП данных
+      const resRnp = await fetch("/api/wb/rnp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resRnp.ok) {
+        const errorData = await resRnp.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении данных РНП");
+      }
+
+      const rnpData = await resRnp.json();
+      console.log("✅ Данные РНП получены:", rnpData.rows?.length || 0, "строк");
+
+      // Создание Excel файла
+      const workbook = XLSX.utils.book_new();
+      
+      // Добавляем лист "РНП"
+      const rnpHeader = rnpData.fields || [];
+      const rnpRows = (rnpData.rows || []).map((row: Record<string, unknown>) => 
+        rnpHeader.map((key: string) => row[key] ?? "")
+      );
+      const rnpSheet = XLSX.utils.aoa_to_sheet([rnpHeader, ...rnpRows]);
+      
+      // Настройка ширины колонок для РНП
+      const rnpColWidths = [
+        { wch: 12 },  // ID отчета
+        { wch: 12 },  // Дата начала
+        { wch: 12 },  // Дата окончания
+        { wch: 12 },  // Дата создания
+        { wch: 10 },  // Валюта
+        { wch: 15 },  // Договор
+        { wch: 10 },  // Номер отчета
+        { wch: 12 },  // Старый ID отчета
+        { wch: 20 },  // Артикул продавца
+        { wch: 12 },  // Размер
+        { wch: 15 },  // Штрихкод
+        { wch: 12 },  // Всего
+        { wch: 12 },  // Количество доставок
+        { wch: 12 },  // Количество возвратов
+        { wch: 15 },  // Цена розничная
+        { wch: 15 },  // Скидка продавца
+        { wch: 15 },  // Скидка WB
+        { wch: 12 },  // Промокод
+        { wch: 15 },  // Цена со скидкой
+        { wch: 15 },  // Комиссия WB
+        { wch: 12 },  // Оплата продавцу
+        { wch: 15 },  // К перечислению
+        { wch: 12 },  // Дата продажи
+        { wch: 12 },  // ГП
+        { wch: 12 },  // Номер поставки
+        { wch: 15 },  // Страна
+        { wch: 15 },  // Область
+        { wch: 12 },  // Артикул WB
+        { wch: 12 },  // Тип документа
+        { wch: 12 },  // Номер заказа
+        { wch: 20 },  // Наименование
+        { wch: 15 }   // Офис
+      ];
+      rnpSheet["!cols"] = rnpColWidths;
+
+      XLSX.utils.book_append_sheet(workbook, rnpSheet, "РНП");
+
+      // Генерация и скачивание файла
+      const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([excelBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      link.download = `РНП_${totalDays}дн_${dateFrom}_${dateTo}.xlsx`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      console.log("✅ Файл РНП успешно скачан");
+    } catch (error) {
+      console.error("❌ Ошибка при скачивании РНП:", error);
+      
+      let userFriendlyMessage = "Произошла ошибка при загрузке РНП";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
+          userFriendlyMessage = "Ошибка сети. Проверьте подключение к интернету";
+        } else if (error.message.includes("401") || error.message.includes("авторизац")) {
+          userFriendlyMessage = "Ошибка авторизации. Проверьте правильность токена";
+        } else if (error.message.includes("429")) {
+          userFriendlyMessage = "Превышен лимит запросов. Попробуйте через минуту";
+        } else if (error.message.includes("500")) {
+          userFriendlyMessage = "Внутренняя ошибка сервера Wildberries. Попробуйте позже";
+        } else {
+          userFriendlyMessage = error.message;
+        }
+      }
+      
+      alert(userFriendlyMessage);
+    } finally {
+      setIsLoadingRemainsRnp(false);
+    }
+  };
+
+  const handleSupplyAnalysisDownload = async () => {
+    try {
+      setIsLoadingAnalysis(true);
+      
+      // Валидация токена
+      if (!token.trim()) {
+        alert("Введите API токен Wildberries");
+        return;
+      }
+      
+      // Валидация полей срока поставки и запаса
+      const delivery = parseFloat(deliveryDays);
+      const stock = parseFloat(stockDays);
+      
+      if (!deliveryDays || isNaN(delivery) || delivery <= 0) {
+        alert("Введите корректный срок поставки (больше 0)");
+        return;
+      }
+      
+      if (!stockDays || isNaN(stock) || stock <= 0) {
+        alert("Введите корректный запас (больше 0)");
+        return;
+      }
+      
+      console.log("📊 Запуск анализа поставок (Остатки + РНП)...");
+      
+      // Рассчитываем период для РНП
+      const totalDays = Math.ceil(delivery + stock);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+      
+      const startDate = new Date(yesterday);
+      startDate.setDate(yesterday.getDate() - totalDays + 1);
+      
+      const dateFrom = startDate.toISOString().split('T')[0];
+      const dateTo = yesterday.toISOString().split('T')[0];
+      
+      const payload = { token, dateFrom, dateTo };
+      
+      // Параллельный запрос остатков, РНП и номенклатуры
+      console.log("📊 Загрузка остатков, РНП и номенклатуры...");
+      
+      const [resWarehouseRemains, resRnp, resNomenclature] = await Promise.all([
+        fetch("/api/wb/warehouse-remains", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        }),
+        fetch("/api/wb/rnp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+        fetch("/api/wb/nomenclature", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        })
+      ]);
+
+      // Проверка ответов
+      if (!resWarehouseRemains.ok) {
+        const errorData = await resWarehouseRemains.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении остатков на складах");
+      }
+
+      if (!resRnp.ok) {
+        const errorData = await resRnp.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении данных РНП");
+      }
+
+      if (!resNomenclature.ok) {
+        const errorData = await resNomenclature.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении номенклатуры");
+      }
+
+      const warehouseRemains = await resWarehouseRemains.json();
+      const rnpData = await resRnp.json();
+      const nomenclature = await resNomenclature.json();
+      
+      console.log("✅ Остатки получены:", warehouseRemains.rows?.length || 0, "строк");
+      console.log("✅ РНП получены:", rnpData.rows?.length || 0, "строк");
+      console.log("✅ Номенклатура получена:", nomenclature.rows?.length || 0, "строк");
+
+      // Группировка товаров по артикулу продавца
+      const groupedProducts: Record<string, {
+        vendorCode: string;
+        brand: string;
+        sizes: Array<{
+          size: string;
+          barcode: string;
+          nmId: string;
+        }>;
+      }> = {};
+
+      (nomenclature.rows || []).forEach((item: Record<string, unknown>) => {
+        const vendorCode = String(item["Артикул продавца"] || "");
+        const brand = String(item["Бренд"] || "");
+        const techSize = String(item["Технический размер"] || "");
+        const skus = String(item["SKU"] || "");
+        const nmId = String(item["ID товара"] || "");
+        
+        if (!vendorCode) return;
+        
+        if (!groupedProducts[vendorCode]) {
+          groupedProducts[vendorCode] = {
+            vendorCode,
+            brand,
+            sizes: []
+          };
+        }
+        
+        // SKU содержит штрихкоды, разделенные ;\n
+        // Технический размер уже в отдельном поле
+        // ID товара (nmId) тоже в отдельном поле
+        if (skus && skus.trim() !== '') {
+          const barcodes = skus.split(';\n').filter((barcode: string) => barcode.trim() !== '');
+          
+          // Если есть штрихкоды, добавляем запись для каждого штрихкода
+          if (barcodes.length > 0) {
+            barcodes.forEach((barcode: string) => {
+              groupedProducts[vendorCode].sizes.push({
+                size: techSize,
+                barcode: barcode.trim(),
+                nmId: nmId
+              });
+            });
+          } else {
+            // Если штрихкодов нет, но есть размер
+            groupedProducts[vendorCode].sizes.push({
+              size: techSize,
+              barcode: "",
+              nmId: nmId
+            });
+          }
+        } else if (techSize) {
+          // Если SKU пусто, но есть размер
+          groupedProducts[vendorCode].sizes.push({
+            size: techSize,
+            barcode: "",
+            nmId: nmId
+          });
+        }
+      });
+
+      // Создание Excel файла с листами
+      const workbook = XLSX.utils.book_new();
+      
+      // Лист 1: Аналитика (группированные товары)
+      const analyticsData: unknown[][] = [];
+      
+      // Заголовки (строка 3)
+      analyticsData.push([]); // Строка 1 (пустая)
+      analyticsData.push([]); // Строка 2 (пустая)
+      analyticsData.push(["Артикул", "Размер", "Штрихкод", "Артикул WB", "Бренд"]); // Строка 3 - заголовки
+      
+      // Данные по товарам
+      Object.values(groupedProducts).forEach((product) => {
+        if (product.sizes.length === 0) {
+          // Если нет размеров, добавляем одну строку с артикулом и брендом
+          analyticsData.push([
+            product.vendorCode,
+            "",
+            "",
+            "",
+            product.brand
+          ]);
+        } else {
+          // Для каждого размера добавляем отдельную строку
+          product.sizes.forEach((size) => {
+            analyticsData.push([
+              product.vendorCode,
+              size.size,
+              size.barcode,
+              size.nmId,
+              product.brand
+            ]);
+          });
+        }
+      });
+      
+      const analyticsSheet = XLSX.utils.aoa_to_sheet(analyticsData);
+      
+      // Настройка ширины колонок для аналитики
+      const analyticsColWidths = [
+        { wch: 20 }, // Артикул
+        { wch: 12 }, // Размер
+        { wch: 15 }, // Штрихкод
+        { wch: 12 }, // Артикул WB
+        { wch: 20 }  // Бренд
+      ];
+      analyticsSheet["!cols"] = analyticsColWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, analyticsSheet, "Аналитика");
+      
+      // Лист 2: Остатки
+      const remainsHeader = warehouseRemains.fields || [];
+      const remainsRows = (warehouseRemains.rows || []).map((row: Record<string, unknown>) => 
+        remainsHeader.map((key: string) => row[key] ?? "")
+      );
+      const remainsSheet = XLSX.utils.aoa_to_sheet([remainsHeader, ...remainsRows]);
+      
+      const remainsColWidths = [
+        { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 15 },
+        { wch: 10 }, { wch: 10 }, { wch: 25 }, { wch: 12 }, { wch: 12 },
+        { wch: 15 }, { wch: 15 }, { wch: 12 }
+      ];
+      remainsSheet["!cols"] = remainsColWidths;
+      XLSX.utils.book_append_sheet(workbook, remainsSheet, "Остатки");
+
+      // Лист 3: РНП
+      const rnpHeader = rnpData.fields || [];
+      const rnpRows = (rnpData.rows || []).map((row: Record<string, unknown>) => 
+        rnpHeader.map((key: string) => row[key] ?? "")
+      );
+      const rnpSheet = XLSX.utils.aoa_to_sheet([rnpHeader, ...rnpRows]);
+      
+      const rnpColWidths = [
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 },
+        { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 12 },
+        { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 },
+        { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 },
+        { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+        { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+        { wch: 20 }, { wch: 15 }
+      ];
+      rnpSheet["!cols"] = rnpColWidths;
+      XLSX.utils.book_append_sheet(workbook, rnpSheet, "РНП");
+
+      // Лист 4: Номенклатура с себестоимостью
+      const savedCosts = loadCostsFromStorage(); // Загружаем сохраненные себестоимости
+      
+      // Обновляем строки номенклатуры с себестоимостью
+      const updatedNomenclatureRows = (nomenclature.rows || []).map((row: Record<string, unknown>) => {
+        const skus = String(row["SKU"] || "");
+        let cost = "";
+        
+        if (skus) {
+          const skuList = skus.split(';\n').filter((sku: string) => sku.trim() !== '');
+          for (const sku of skuList) {
+            const trimmedSku = sku.trim();
+            if (savedCosts[trimmedSku]) {
+              cost = savedCosts[trimmedSku];
+              break;
+            }
+          }
+        }
+        
+        return { ...row, "Себестоимость": cost };
+      });
+      
+      // Убеждаемся, что "Себестоимость" есть в заголовках
+      const nomenclatureHeader = nomenclature.fields.includes("Себестоимость") 
+        ? nomenclature.fields 
+        : [...nomenclature.fields, "Себестоимость"];
+      
+      const nomenclatureRows = updatedNomenclatureRows.map((row: Record<string, unknown>) => 
+        nomenclatureHeader.map((key: string) => row[key] ?? "")
+      );
+      const nomenclatureSheet = XLSX.utils.aoa_to_sheet([nomenclatureHeader, ...nomenclatureRows]);
+      
+      // Настройка ширины колонок для номенклатуры
+      const nomenclatureColWidths = [
+        { wch: 12 }, // ID товара
+        { wch: 12 }, // ID предмета
+        { wch: 20 }, // Артикул продавца
+        { wch: 15 }, // Бренд
+        { wch: 30 }, // Наименование
+        { wch: 15 }, // Предмет
+        { wch: 12 }, // Длина (см)
+        { wch: 12 }, // Ширина (см)
+        { wch: 12 }, // Высота (см)
+        { wch: 12 }, // Объем (л)
+        { wch: 16 }, // Дата создания
+        { wch: 16 }, // Дата обновления
+        { wch: 10 }, // Запрещен
+        { wch: 8 },  // Статус
+        { wch: 15 }, // ID характеристики
+        { wch: 15 }, // Технический размер
+        { wch: 12 }, // Размер WB
+        { wch: 20 }, // SKU
+        { wch: 12 }, // Дата выгрузки
+        { wch: 15 }  // Себестоимость
+      ];
+      nomenclatureSheet["!cols"] = nomenclatureColWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, nomenclatureSheet, "Номенклатура");
+
+      // Лист 5: Значения (параметры) - последний лист
+      const coeffValue = coefficient ? parseFloat(coefficient) : 0;
+      const deliveryValue = delivery; // Срок поставки уже распарсен выше
+      const stockValue = stock; // Запас уже распарсен выше
+      
+      const valuesData: unknown[][] = [
+        ["Параметр", "Значение"],
+        ["Срок поставки (дн.)", deliveryValue],
+        ["Запас (дн.)", stockValue],
+        ["Коэффициент", coeffValue],
+        [], // Строка 5 (пустая)
+        [], // Строка 6 (пустая)
+        [], // Строка 7 (пустая)
+        [], // Строка 8 (пустая)
+        [], // Строка 9 (пустая)
+        ["Центральный"], // Строка 10
+        ["Пушкино"],
+        ["Вёшки"],
+        ["Иваново"],
+        ["Подольск 3"],
+        ["Радумля 1"],
+        ["Подольск 4"],
+        ["Обухово 2"],
+        ["Чашниково"],
+        ["Истра"],
+        ["Коледино: Горючее"],
+        ["Обухово СГТ"],
+        ["Голицыно СГТ"],
+        ["Радумля СГТ"],
+        ["Софьино СГТ"],
+        ["Софьино СГТ"],
+        ["Ярославль СГТ"],
+        ["Цифровой склад"],
+        ["Рязань (Тюшевское)"],
+        ["Сабурово"],
+        ["Владимир"],
+        ["Тула"],
+        ["Котовск"],
+        ["Электросталь"],
+        ["Воронеж"],
+        ["Обухово"],
+        ["Коледино"],
+        ["Белая дача"],
+        ["Подольск"],
+        ["Щербинка"],
+        ["Чехов 1"],
+        ["Чехов 2"],
+        ["Белые Столбы"],
+        [], // Строка 43 (пустая)
+        ["Екб"], // Строка 44
+        ["Екатеринбург - Испытателей 14г"],
+        ["Екатеринбург - Перспективный 12/2"],
+        [], // Строка 47 (пустая)
+        ["Приволжский"], // Строка 48
+        ["СЦ Ижевск"],
+        ["СЦ Кузнецк"],
+        ["Пенза СГТ"],
+        ["Кузнецк СГТ"],
+        ["Пенза"],
+        ["Самара (Новосемейкино)"],
+        ["Сарапул"],
+        ["Казань"]
+      ];
+      
+      const valuesSheet = XLSX.utils.aoa_to_sheet(valuesData);
+      
+      // Настройка ширины колонок для значений
+      const valuesColWidths = [
+        { wch: 25 }, // Параметр
+        { wch: 15 }  // Значение
+      ];
+      valuesSheet["!cols"] = valuesColWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, valuesSheet, "Значения");
+
+      // Генерация и скачивание файла
+      const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([excelBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      const currentDate = new Date().toISOString().split('T')[0];
+      link.download = `Анализ_поставок_${totalDays}дн_${currentDate}.xlsx`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      console.log("✅ Файл анализа поставок успешно скачан");
+    } catch (error) {
+      console.error("❌ Ошибка при скачивании анализа поставок:", error);
+      
+      let userFriendlyMessage = "Произошла ошибка при загрузке анализа поставок";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
+          userFriendlyMessage = "Ошибка сети. Проверьте подключение к интернету";
+        } else if (error.message.includes("401") || error.message.includes("авторизац")) {
+          userFriendlyMessage = "Ошибка авторизации. Проверьте правильность токена";
+        } else if (error.message.includes("429")) {
+          userFriendlyMessage = "Превышен лимит запросов. Попробуйте через минуту";
+        } else if (error.message.includes("500")) {
+          userFriendlyMessage = "Внутренняя ошибка сервера Wildberries. Попробуйте позже";
+        } else {
+          userFriendlyMessage = error.message;
+        }
+      }
+      
+      alert(userFriendlyMessage);
+    } finally {
+      setIsLoadingAnalysis(false);
     }
   };
 
@@ -894,6 +1981,142 @@ export default function Home() {
                   "Себестоимость"
                 )}
               </button>
+            </div>
+
+            {/* Секция РНП */}
+            <div className="pt-4 border-t border-black/[.08] dark:border-white/[.145]">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-lg font-semibold">РНП (Полный отчет за день)</h3>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Включает: Аналитика по товарам, РНП, Платное хранение, Платная приемка, Финансы РК, Остатки, Номенклатура
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium">Дата для РНП:</span>
+                  <div>
+                    <label htmlFor="rnp-date" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                      Выберите дату
+                    </label>
+                    <input
+                      id="rnp-date"
+                      type="date"
+                      value={rnpDate}
+                      onChange={(e) => setRnpDate(e.target.value)}
+                      className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                    />
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Полный отчет с ежедневными данными реализации и всеми дополнительными листами за выбранный день
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRnpDownload}
+                  disabled={isLoadingRnp}
+                  className={`w-full h-11 rounded-lg bg-green-600 text-white dark:bg-green-500 dark:text-white font-medium transition-opacity ${
+                    isLoadingRnp ? "opacity-60 cursor-not-allowed" : "hover:opacity-90"
+                  }`}
+                >
+                  {isLoadingRnp ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                      Загрузка полного отчета...
+                    </span>
+                  ) : (
+                    "Скачать полный РНП"
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Секция Смарт поставка */}
+            <div className="pt-4 border-t border-black/[.08] dark:border-white/[.145]">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-lg font-semibold">Смарт поставка</h3>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Распределение по регионам
+                </div>
+
+                {/* Параметры для расчета остатков */}
+                <div className="grid grid-cols-3 gap-3 mt-2">
+                  <div>
+                    <label htmlFor="delivery-days" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                      Срок поставки (дн.):
+                    </label>
+                    <input
+                      id="delivery-days"
+                      type="text"
+                      inputMode="decimal"
+                      value={deliveryDays}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(',', '.');
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setDeliveryDays(value);
+                        }
+                      }}
+                      placeholder="0"
+                      className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6] text-center"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="stock-days" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                      Запас (дн.):
+                    </label>
+                    <input
+                      id="stock-days"
+                      type="text"
+                      inputMode="decimal"
+                      value={stockDays}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(',', '.');
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setStockDays(value);
+                        }
+                      }}
+                      placeholder="0"
+                      className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6] text-center"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="coefficient" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                      Коэффициент:
+                    </label>
+                    <input
+                      id="coefficient"
+                      type="text"
+                      inputMode="decimal"
+                      value={coefficient}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(',', '.');
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setCoefficient(value);
+                        }
+                      }}
+                      placeholder="0"
+                      className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6] text-center"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSupplyAnalysisDownload}
+                  disabled={isLoadingAnalysis}
+                  className={`w-full h-11 rounded-lg bg-emerald-600 text-white dark:bg-emerald-500 dark:text-white font-medium transition-opacity ${
+                    isLoadingAnalysis ? "opacity-60 cursor-not-allowed" : "hover:opacity-90"
+                  }`}
+                >
+                  {isLoadingAnalysis ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                      Загрузка анализа...
+                    </span>
+                  ) : (
+                    "Анализ поставок"
+                  )}
+                </button>
+              </div>
             </div>
           </div>
       </div>
