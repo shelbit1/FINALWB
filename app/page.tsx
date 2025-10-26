@@ -1016,7 +1016,7 @@ export default function Home() {
         return;
       }
       
-      console.log("📊 Запуск анализа поставок (Остатки + РНП)...");
+      console.log("📊 Запуск анализа поставок (Остатки + РНП + Заказы)...");
       
       // Рассчитываем период для РНП
       const totalDays = Math.ceil(delivery + stock);
@@ -1032,26 +1032,45 @@ export default function Home() {
       
       const payload = { token, dateFrom, dateTo };
       
-      // Параллельный запрос остатков, РНП и номенклатуры
-      console.log("📊 Загрузка остатков, РНП и номенклатуры...");
+      // Последовательный запрос с задержками для соблюдения лимитов API
+      console.log("📊 Загрузка данных с задержками между запросами...");
       
-      const [resWarehouseRemains, resRnp, resNomenclature] = await Promise.all([
-        fetch("/api/wb/warehouse-remains", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
-        }),
-        fetch("/api/wb/rnp", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }),
-        fetch("/api/wb/nomenclature", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
-        })
-      ]);
+      console.log("📊 Загрузка остатков...");
+      const resWarehouseRemains = await fetch("/api/wb/warehouse-remains", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      
+      // Задержка 2 секунды
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      console.log("📊 Загрузка РНП...");
+      const resRnp = await fetch("/api/wb/rnp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      
+      // Задержка 2 секунды
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      console.log("📊 Загрузка номенклатуры...");
+      const resNomenclature = await fetch("/api/wb/nomenclature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      
+      // Задержка 2 секунды перед заказами
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      console.log("📊 Загрузка заказов...");
+      const resOrders = await fetch("/api/wb/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, dateFrom: dateFrom, dateTo: dateTo }),
+      });
 
       // Проверка ответов
       if (!resWarehouseRemains.ok) {
@@ -1069,13 +1088,20 @@ export default function Home() {
         throw new Error(errorData.error || "Ошибка при получении номенклатуры");
       }
 
+      if (!resOrders.ok) {
+        const errorData = await resOrders.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении заказов");
+      }
+
       const warehouseRemains = await resWarehouseRemains.json();
       const rnpData = await resRnp.json();
       const nomenclature = await resNomenclature.json();
+      const ordersData = await resOrders.json();
       
       console.log("✅ Остатки получены:", warehouseRemains.rows?.length || 0, "строк");
       console.log("✅ РНП получены:", rnpData.rows?.length || 0, "строк");
       console.log("✅ Номенклатура получена:", nomenclature.rows?.length || 0, "строк");
+      console.log("✅ Заказы получены:", ordersData.rows?.length || 0, "строк");
 
       // Группировка товаров по артикулу продавца
       const groupedProducts: Record<string, {
@@ -1281,7 +1307,49 @@ export default function Home() {
       
       XLSX.utils.book_append_sheet(workbook, nomenclatureSheet, "Номенклатура");
 
-      // Лист 5: Значения (параметры) - последний лист
+      // Лист 5: Заказы
+      const ordersHeader = ordersData.fields || [];
+      const ordersRows = (ordersData.rows || []).map((row: Record<string, unknown>) => 
+        ordersHeader.map((key: string) => row[key] ?? "")
+      );
+      const ordersSheet = XLSX.utils.aoa_to_sheet([ordersHeader, ...ordersRows]);
+      
+      // Настройка ширины колонок для заказов
+      const ordersColWidths = [
+        { wch: 12 }, // Дата
+        { wch: 18 }, // Дата изменения
+        { wch: 20 }, // Склад
+        { wch: 15 }, // Тип склада
+        { wch: 15 }, // Страна
+        { wch: 20 }, // Округ
+        { wch: 15 }, // Регион
+        { wch: 20 }, // Артикул продавца
+        { wch: 12 }, // Артикул WB
+        { wch: 15 }, // Штрихкод
+        { wch: 20 }, // Категория
+        { wch: 20 }, // Предмет
+        { wch: 15 }, // Бренд
+        { wch: 12 }, // Размер
+        { wch: 12 }, // ID поставки
+        { wch: 10 }, // Поставка
+        { wch: 12 }, // Реализация
+        { wch: 15 }, // Цена без скидки
+        { wch: 10 }, // Скидка %
+        { wch: 10 }, // СПП
+        { wch: 18 }, // Цена после всех скидок
+        { wch: 15 }, // Цена со скидкой
+        { wch: 10 }, // Отменен
+        { wch: 18 }, // Дата отмены
+        { wch: 15 }, // Тип заказа
+        { wch: 15 }, // Стикер
+        { wch: 20 }, // Номер заказа
+        { wch: 35 }, // SRID
+        { wch: 12 }  // Количество
+      ];
+      ordersSheet["!cols"] = ordersColWidths;
+      XLSX.utils.book_append_sheet(workbook, ordersSheet, "Заказы");
+
+      // Лист 6: Значения (параметры) - последний лист
       const coeffValue = coefficient ? parseFloat(coefficient) : 0;
       const deliveryValue = delivery; // Срок поставки уже распарсен выше
       const stockValue = stock; // Запас уже распарсен выше
@@ -1342,7 +1410,13 @@ export default function Home() {
         ["Пенза"],
         ["Самара (Новосемейкино)"],
         ["Сарапул"],
-        ["Казань"]
+        ["Казань"],
+        [], // Строка 57 (пустая)
+        ["Юг + Кавказ"], // Строка 58
+        ["Крыловская"],
+        ["Волгоград"],
+        ["Невинномысск"],
+        ["Краснодар"]
       ];
       
       const valuesSheet = XLSX.utils.aoa_to_sheet(valuesData);
