@@ -90,8 +90,13 @@ export async function POST(request: NextRequest) {
     const rows: Record<string, string | number>[] = [];
 
     for (const item of allStats) {
+      const rawCampaignId = (item as Record<string, unknown>)['campaignId'];
+      const normalizedCampaignId: string | number =
+        typeof rawCampaignId === 'number' || typeof rawCampaignId === 'string'
+          ? rawCampaignId
+          : String(rawCampaignId ?? '');
       const row: Record<string, string | number> = {
-        'ID кампании': item.campaignId || '',
+        'ID кампании': normalizedCampaignId,
       };
 
       // Добавляем все поля из ответа
