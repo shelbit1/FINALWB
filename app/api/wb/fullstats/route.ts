@@ -314,7 +314,12 @@ export async function POST(request: NextRequest) {
     }
 
     for (const item of allStats) {
-      const advertId = (item && (item.advertId ?? item.id)) ?? '';
+      // Надежно извлекаем и нормализуем ID кампании к string | number
+      const rawAdvertId = (item && ((item as Record<string, unknown>).advertId ?? (item as Record<string, unknown>).id)) ?? '';
+      const advertId: string | number =
+        typeof rawAdvertId === 'number' || typeof rawAdvertId === 'string'
+          ? rawAdvertId
+          : String(rawAdvertId ?? '');
       const campaignId = typeof advertId === 'number' ? advertId : Number(advertId);
       
       // Получаем тип кампании из карты (из листа "РК")
@@ -346,10 +351,13 @@ export async function POST(request: NextRequest) {
             skuIdValue = String(skuIdValue || '');
           }
           
+          const dayDate = (day && typeof (day as Record<string, unknown>).date === 'string')
+            ? (day as Record<string, unknown>).date as string
+            : (safeStringify((day as Record<string, unknown>)?.date) as string);
           const row: Record<string, string | number> = {
             'ID кампании': advertId,
             'Тип': getCampaignType(type),
-            'Дата': day?.date || '',
+            'Дата': dayDate,
             'SKU ID': skuIdValue,
           };
 
