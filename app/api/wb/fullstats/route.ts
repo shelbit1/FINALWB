@@ -227,7 +227,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Получаем SKU ID и типы для всех кампаний
-    const uniqueCampaignIds = Array.from(new Set(allStats.map(item => item?.advertId || item?.id).filter(Boolean)));
+    const uniqueCampaignIds = Array.from(
+      new Set(
+        allStats
+          .map(item => item?.advertId || item?.id)
+          .filter((id): id is number => typeof id === 'number')
+      )
+    );
     const { skusMap: campaignSkusMap, typesMap: campaignTypesMap } = await fetchCampaignData(token, uniqueCampaignIds);
     
     // Преобразуем в плоские строки для Excel: строка на каждый день по каждой кампании
