@@ -307,8 +307,9 @@ export async function POST(request: NextRequest) {
     // Логирование структуры данных для отладки
     if (allStats.length > 0) {
       console.log('📊 Структура первого элемента allStats:', JSON.stringify(allStats[0]).substring(0, 1000));
-      if (allStats[0]?.days && allStats[0].days.length > 0) {
-        console.log('📊 Структура первого дня:', JSON.stringify(allStats[0].days[0]).substring(0, 1000));
+      const firstItemDays = allStats[0]?.days;
+      if (Array.isArray(firstItemDays) && firstItemDays.length > 0) {
+        console.log('📊 Структура первого дня:', JSON.stringify(firstItemDays[0]).substring(0, 1000));
       }
     }
 
