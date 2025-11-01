@@ -1661,8 +1661,11 @@ export default function Home() {
                   const value = row[key];
                   // Безопасная конвертация значений для Excel
                   if (value === null || value === undefined) return '';
-                  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                  if (typeof value === 'string' || typeof value === 'number') {
                     return value;
+                  }
+                  if (typeof value === 'boolean') {
+                    return value ? 'true' : 'false';
                   }
                   if (typeof value === 'object') {
                     // Если это объект или массив, конвертируем в JSON строку
@@ -1693,6 +1696,27 @@ export default function Home() {
         console.error('❌ Критическая ошибка при построении листа "Статистика компаний":', statsErr);
         statsRows = [[`Ошибка: ${(statsErr as Error).message || 'Неизвестная ошибка'}`, '', '', '', '']];
       }
+      
+      // Собираем уникальные SKU ID из statsRows для листов аналитики
+      const uniqueSkus = new Set<string>();
+      
+      if (statsRows && statsRows.length > 0) {
+        const skuColumnIndex = statsHeader.indexOf('SKU ID');
+        
+        if (skuColumnIndex !== -1) {
+          statsRows.forEach((row: (string | number)[]) => {
+            const skuValue = row[skuColumnIndex];
+            if (skuValue && String(skuValue).trim() !== '') {
+              // Если SKU ID содержит несколько артикулов через запятую, разделяем их
+              const skus = String(skuValue).split(',').map(s => s.trim()).filter(Boolean);
+              skus.forEach(sku => uniqueSkus.add(sku));
+            }
+          });
+        }
+      }
+      
+      const uniqueSkuArray = Array.from(uniqueSkus).sort((a, b) => a.localeCompare(b));
+      console.log(`📊 Найдено ${uniqueSkuArray.length} уникальных артикулов для аналитики`);
       
       // Создаем лист ВСЕГДА
       const statsSheet = XLSX.utils.aoa_to_sheet([statsHeader, ...statsRows]);
@@ -1745,8 +1769,11 @@ export default function Home() {
                   const value = row[key];
                   // Безопасная конвертация значений для Excel
                   if (value === null || value === undefined) return '';
-                  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                  if (typeof value === 'string' || typeof value === 'number') {
                     return value;
+                  }
+                  if (typeof value === 'boolean') {
+                    return value ? 'true' : 'false';
                   }
                   if (typeof value === 'object') {
                     // Если это объект или массив, конвертируем в JSON строку
@@ -1833,8 +1860,11 @@ export default function Home() {
                   const value = row[key];
                   // Безопасная конвертация значений для Excel
                   if (value === null || value === undefined) return '';
-                  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                  if (typeof value === 'string' || typeof value === 'number') {
                     return value;
+                  }
+                  if (typeof value === 'boolean') {
+                    return value ? 'true' : 'false';
                   }
                   if (typeof value === 'object') {
                     // Если это объект или массив, конвертируем в JSON строку
@@ -1872,8 +1902,55 @@ export default function Home() {
       XLSX.utils.book_append_sheet(workbook, normQuerySheet, 'Статистика поисковых кластеров');
       console.log('✅ Лист "Статистика поисковых кластеров" добавлен в книгу');
 
+      // Создаем листы аналитики
+      console.log('📊 Формирование листов аналитики...');
+      
+      // Функция для создания листа аналитики
+      const createAnalyticsSheet = () => {
+        const analyticsData: (string | number)[][] = [
+          [rkDateFrom], // A1 - дата начала
+          [rkDateTo],   // A2 - дата конца
+          [],           // A3 - пустая строка
+          ['Артикул WB'], // A4 - заголовок
+        ];
+        
+        // Добавляем уникальные SKU ID начиная с A5
+        uniqueSkuArray.forEach(sku => {
+          analyticsData.push([sku]);
+        });
+        
+        const sheet = XLSX.utils.aoa_to_sheet(analyticsData);
+        sheet['!cols'] = [{ wch: 20 }]; // Ширина столбца A
+        
+        return sheet;
+      };
+      
+      const analyticsGeneralSheet = createAnalyticsSheet();
+      const analyticsAutoSheet = createAnalyticsSheet();
+      const analyticsManualSheet = createAnalyticsSheet();
+      
+      // Пересобираем workbook с правильным порядком листов
+      // Создаем новый workbook и добавляем листы в нужном порядке
+      const finalWorkbook = XLSX.utils.book_new();
+      
+      // Сначала добавляем листы аналитики
+      XLSX.utils.book_append_sheet(finalWorkbook, analyticsGeneralSheet, 'Аналитика общая (ЕД+РУЧ)');
+      console.log('✅ Лист "Аналитика общая (ЕДИНАЯ + РУЧНАЯ)" добавлен в книгу');
+      
+      XLSX.utils.book_append_sheet(finalWorkbook, analyticsAutoSheet, 'Аналитика ЕДИНАЯ');
+      console.log('✅ Лист "Аналитика ЕДИНАЯ" добавлен в книгу');
+      
+      XLSX.utils.book_append_sheet(finalWorkbook, analyticsManualSheet, 'Аналитика РУЧНАЯ');
+      console.log('✅ Лист "Аналитика РУЧНАЯ" добавлен в книгу');
+      
+      // Затем добавляем все остальные листы из старого workbook
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        XLSX.utils.book_append_sheet(finalWorkbook, sheet, sheetName);
+      });
+      
       // Генерация и скачивание файла
-      const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const arrayBuffer = XLSX.write(finalWorkbook, { bookType: "xlsx", type: "array" });
       const blob = new Blob([arrayBuffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
