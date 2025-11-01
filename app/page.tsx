@@ -77,6 +77,11 @@ export default function Home() {
   const [isLoadingRemainsRnp, setIsLoadingRemainsRnp] = useState(false);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   
+  // Состояния для выгрузки РК
+  const [rkDateFrom, setRkDateFrom] = useState("");
+  const [rkDateTo, setRkDateTo] = useState("");
+  const [isLoadingRk, setIsLoadingRk] = useState(false);
+  
   // Состояния для параметров остатков
   const [deliveryDays, setDeliveryDays] = useState("");
   const [stockDays, setStockDays] = useState("");
@@ -1473,6 +1478,440 @@ export default function Home() {
     }
   };
 
+  const handleRkDownload = async () => {
+    try {
+      setIsLoadingRk(true);
+      
+      // Валидация данных
+      if (!token.trim()) {
+        alert("Введите API токен Wildberries");
+        return;
+      }
+      
+      if (!rkDateFrom || !rkDateTo) {
+        alert("Выберите период для выгрузки РК (от даты и до даты)");
+        return;
+      }
+      
+      const dateFrom = new Date(rkDateFrom);
+      const dateTo = new Date(rkDateTo);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      
+      if (dateFrom > dateTo) {
+        alert("Дата начала периода не может быть позже даты окончания");
+        return;
+      }
+      
+      if (dateTo > today) {
+        alert("Дата окончания периода не может быть в будущем");
+        return;
+      }
+      
+      console.log("📊 Загрузка данных рекламных кампаний за период:", rkDateFrom, "-", rkDateTo);
+      
+      // Запрос данных рекламных кампаний
+      const resCampaigns = await fetch("/api/wb/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      if (!resCampaigns.ok) {
+        const errorData = await resCampaigns.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении данных рекламных кампаний");
+      }
+
+      const campaignsData: { 
+        fields: string[]; 
+        rows: Record<string, unknown>[]; 
+        detailedCampaigns?: Array<Record<string, unknown>>
+      } = await resCampaigns.json();
+      console.log("✅ Данные рекламных кампаний получены:", campaignsData.rows?.length || 0, "строк");
+      
+      // Создаем Excel файл
+      const workbook = XLSX.utils.book_new();
+      
+      // Лист 1: "РК" - основная информация
+      const rkHeader = campaignsData.fields || [];
+      const rkRows = (campaignsData.rows || []).map((row: Record<string, unknown>) => 
+        rkHeader.map((key: string) => row[key] ?? "")
+      );
+      const rkSheet = XLSX.utils.aoa_to_sheet([rkHeader, ...rkRows]);
+      
+      // Настройка ширины колонок для листа "РК"
+      const rkColWidths = [
+        { wch: 12 }, // ID кампании
+        { wch: 30 }, // Название кампании
+        { wch: 25 }, // Тип
+        { wch: 18 }, // Статус
+        { wch: 20 }, // Дата создания
+        { wch: 20 }, // Дата изменения
+        { wch: 20 }, // Дата начала
+        { wch: 20 }, // Дата окончания
+        { wch: 15 }  // Дневной бюджет
+      ];
+      rkSheet["!cols"] = rkColWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, rkSheet, "РК");
+
+      // Лист 2: "Информация о компаниях" - детальная информация
+      if (campaignsData.detailedCampaigns && campaignsData.detailedCampaigns.length > 0) {
+        console.log("📊 Создание листа с детальной информацией о кампаниях...");
+        
+        // Функция для безопасного преобразования значений с ограничением длины
+        const safeStringify = (value: unknown): string => {
+          const MAX_EXCEL_CELL_LENGTH = 32767; // Максимальная длина текста в ячейке Excel
+          
+          if (value === null || value === undefined) return '';
+          
+          let result = '';
+          if (typeof value === 'object') {
+            try {
+              result = JSON.stringify(value, null, 0);
+            } catch {
+              result = String(value);
+            }
+          } else {
+            result = String(value);
+          }
+          
+          // Обрезаем текст, если он слишком длинный
+          if (result.length > MAX_EXCEL_CELL_LENGTH) {
+            return result.substring(0, MAX_EXCEL_CELL_LENGTH - 20) + '... (обрезано)';
+          }
+          
+          return result;
+        };
+
+        // Собираем все возможные ключи из всех кампаний
+        const allKeys = new Set<string>();
+        campaignsData.detailedCampaigns.forEach((campaign: Record<string, unknown>) => {
+          Object.keys(campaign).forEach(key => allKeys.add(key));
+        });
+
+        // Создаем заголовки
+        const detailedHeaders = Array.from(allKeys).sort();
+        
+        // Создаем строки данных
+        const detailedRows = campaignsData.detailedCampaigns.map((campaign: Record<string, unknown>) => 
+          detailedHeaders.map(key => safeStringify(campaign[key]))
+        );
+
+        const detailedSheet = XLSX.utils.aoa_to_sheet([detailedHeaders, ...detailedRows]);
+        
+        // Настройка ширины колонок для детального листа
+        const detailedColWidths = detailedHeaders.map(() => ({ wch: 20 }));
+        detailedSheet["!cols"] = detailedColWidths;
+        
+        XLSX.utils.book_append_sheet(workbook, detailedSheet, "Информация о компаниях");
+        
+        console.log(`✅ Лист "Информация о компаниях" создан с ${detailedRows.length} записями`);
+      }
+      
+      // Лист 3: "Статистика компаний" - по методу /adv/v3/fullstats
+      // ВСЕГДА создаем этот лист, даже если данных нет
+      console.log("📊 Начинаем загрузку статистики компаний...");
+      
+      let statsHeader: string[] = ['ID кампании', 'Тип', 'Дата', 'SKU ID', 'Примечание'];
+      let statsRows: (string | number)[][] = [];
+      
+      try {
+        // Собираем ID кампаний ТОЛЬКО со статусами 7, 9, 11 (требование API WB)
+        // Статусы: 7 = завершена, 9 = активна, 11 = на паузе
+        const allowedStatuses = [7, 9, 11];
+        let ids: number[] = [];
+        
+        if (campaignsData.detailedCampaigns && campaignsData.detailedCampaigns.length > 0) {
+          ids = campaignsData.detailedCampaigns
+            .filter((c: Record<string, unknown>) => {
+              const status = Number(c.status);
+              return allowedStatuses.includes(status);
+            })
+            .map((c: Record<string, unknown>) => Number(c.advertId))
+            .filter((id: number) => Number.isFinite(id));
+        } else {
+          console.warn("⚠️ Нет детальной информации о кампаниях, невозможно определить статусы");
+        }
+        ids = Array.from(new Set(ids));
+        
+        console.log(`📊 Найдено ${ids.length} кампаний со статусами 7/9/11 для статистики:`, ids.slice(0, 10));
+
+        if (ids.length > 0) {
+          console.log("📊 Отправляем запрос на статистику...");
+          
+          const resStats = await fetch('/api/wb/fullstats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, dateFrom: rkDateFrom, dateTo: rkDateTo, ids }),
+          });
+
+          console.log("📊 Ответ от fullstats:", resStats.status, resStats.ok);
+
+          if (resStats.ok) {
+            const statsData: { fields: string[]; rows: Record<string, unknown>[] } = await resStats.json();
+            console.log(`✅ Получена статистика: ${statsData.rows?.length || 0} строк`);
+            
+            if (statsData.fields && statsData.fields.length > 0) {
+              statsHeader = statsData.fields;
+            }
+            if (statsData.rows && statsData.rows.length > 0) {
+              statsRows = statsData.rows.map((row: Record<string, unknown>) => 
+                statsHeader.map((key: string) => {
+                  const value = row[key];
+                  // Безопасная конвертация значений для Excel
+                  if (value === null || value === undefined) return '';
+                  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                    return value;
+                  }
+                  if (typeof value === 'object') {
+                    // Если это объект или массив, конвертируем в JSON строку
+                    try {
+                      const jsonStr = JSON.stringify(value);
+                      // Если JSON слишком длинный, обрезаем
+                      return jsonStr.length > 32000 ? jsonStr.substring(0, 31980) + '... (обрезано)' : jsonStr;
+                    } catch {
+                      return String(value);
+                    }
+                  }
+                  return String(value);
+                })
+              );
+            } else {
+              statsRows = [['Нет данных за выбранный период', '', '', '', '']];
+            }
+          } else {
+            const err = await resStats.json().catch(() => ({} as any));
+            console.error('❌ Ошибка получения статистики:', err?.error || resStats.status);
+            statsRows = [[`Ошибка загрузки: ${err?.error || resStats.status}`, '', '', '', '']];
+          }
+        } else {
+          console.warn('⚠️ Нет кампаний со статусами 7/9/11 для загрузки статистики');
+          statsRows = [['Нет кампаний в статусах: Завершена (7), Активна (9), На паузе (11)', '', '', '', '']];
+        }
+      } catch (statsErr) {
+        console.error('❌ Критическая ошибка при построении листа "Статистика компаний":', statsErr);
+        statsRows = [[`Ошибка: ${(statsErr as Error).message || 'Неизвестная ошибка'}`, '', '', '', '']];
+      }
+      
+      // Создаем лист ВСЕГДА
+      const statsSheet = XLSX.utils.aoa_to_sheet([statsHeader, ...statsRows]);
+      statsSheet['!cols'] = statsHeader.map(() => ({ wch: 20 }));
+      XLSX.utils.book_append_sheet(workbook, statsSheet, 'Статистика компаний');
+      console.log('✅ Лист "Статистика компаний" добавлен в книгу');
+
+      // Лист 4: "Статистика кампании с единой ставкой по кластерам фраз"
+      // ВСЕГДА создаем этот лист, даже если данных нет
+      console.log("📊 Начинаем загрузку статистики по кластерам фраз...");
+      
+      let clusterHeader: string[] = ['ID кампании', 'Примечание'];
+      let clusterRows: (string | number)[][] = [];
+      
+      try {
+        // Собираем ID кампаний с типом 8 (единая ставка)
+        let campaignType8Ids: number[] = [];
+        
+        if (campaignsData.detailedCampaigns && campaignsData.detailedCampaigns.length > 0) {
+          campaignType8Ids = campaignsData.detailedCampaigns
+            .filter((c: Record<string, unknown>) => Number(c.type) === 8)
+            .map((c: Record<string, unknown>) => Number(c.advertId))
+            .filter((id: number) => Number.isFinite(id));
+        }
+        campaignType8Ids = Array.from(new Set(campaignType8Ids));
+        
+        console.log(`📊 Найдено ${campaignType8Ids.length} кампаний с единой ставкой (тип 8)`);
+
+        if (campaignType8Ids.length > 0) {
+          console.log("📊 Отправляем запрос на статистику по кластерам...");
+          
+          const resCluster = await fetch('/api/wb/stat-words', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, ids: campaignType8Ids }),
+          });
+
+          console.log("📊 Ответ от stat-words:", resCluster.status, resCluster.ok);
+
+          if (resCluster.ok) {
+            const clusterData: { fields: string[]; rows: Record<string, unknown>[] } = await resCluster.json();
+            console.log(`✅ Получена статистика по кластерам: ${clusterData.rows?.length || 0} строк`);
+            
+            if (clusterData.fields && clusterData.fields.length > 0) {
+              clusterHeader = clusterData.fields;
+            }
+            if (clusterData.rows && clusterData.rows.length > 0) {
+              clusterRows = clusterData.rows.map((row: Record<string, unknown>) => 
+                clusterHeader.map((key: string) => {
+                  const value = row[key];
+                  // Безопасная конвертация значений для Excel
+                  if (value === null || value === undefined) return '';
+                  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                    return value;
+                  }
+                  if (typeof value === 'object') {
+                    // Если это объект или массив, конвертируем в JSON строку
+                    try {
+                      const jsonStr = JSON.stringify(value);
+                      // Если JSON слишком длинный, обрезаем
+                      return jsonStr.length > 32000 ? jsonStr.substring(0, 31980) + '... (обрезано)' : jsonStr;
+                    } catch {
+                      return String(value);
+                    }
+                  }
+                  return String(value);
+                })
+              );
+            } else {
+              clusterRows = [['Нет данных по кластерам фраз', '']];
+            }
+          } else {
+            const err = await resCluster.json().catch(() => ({} as any));
+            console.error('❌ Ошибка получения статистики по кластерам:', err?.error || resCluster.status);
+            clusterRows = [[`Ошибка загрузки: ${err?.error || resCluster.status}`, '']];
+          }
+        } else {
+          console.warn('⚠️ Нет кампаний с единой ставкой (тип 8)');
+          clusterRows = [['Нет кампаний с единой ставкой (тип 8)', '']];
+        }
+      } catch (clusterErr) {
+        console.error('❌ Критическая ошибка при построении листа кластеров:', clusterErr);
+        clusterRows = [[`Ошибка: ${(clusterErr as Error).message || 'Неизвестная ошибка'}`, '']];
+      }
+      
+      // Создаем лист ВСЕГДА
+      const clusterSheet = XLSX.utils.aoa_to_sheet([clusterHeader, ...clusterRows]);
+      clusterSheet['!cols'] = clusterHeader.map(() => ({ wch: 20 }));
+      XLSX.utils.book_append_sheet(workbook, clusterSheet, 'Кластеры фраз');
+      console.log('✅ Лист "Кластеры фраз" добавлен в книгу');
+
+      // Лист 5: "Статистика поисковых кластеров" - по методу /adv/v0/normquery/stats
+      // ВСЕГДА создаем этот лист, даже если данных нет
+      console.log("📊 Начинаем загрузку статистики поисковых кластеров...");
+      
+      let normQueryHeader: string[] = ['ID кампании', 'Примечание'];
+      let normQueryRows: (string | number)[][] = [];
+      
+      try {
+        // Собираем ID кампаний со статусами 7, 9, 11 (активные, завершенные, на паузе)
+        // Метод /adv/v0/normquery/stats работает только для кампаний CPM
+        let cpmCampaignIds: number[] = [];
+        
+        if (campaignsData.detailedCampaigns && campaignsData.detailedCampaigns.length > 0) {
+          cpmCampaignIds = campaignsData.detailedCampaigns
+            .filter((c: Record<string, unknown>) => {
+              const status = Number(c.status);
+              return [7, 9, 11].includes(status);
+            })
+            .map((c: Record<string, unknown>) => Number(c.advertId))
+            .filter((id: number) => Number.isFinite(id));
+        }
+        cpmCampaignIds = Array.from(new Set(cpmCampaignIds));
+        
+        console.log(`📊 Найдено ${cpmCampaignIds.length} кампаний для статистики поисковых кластеров`);
+
+        if (cpmCampaignIds.length > 0) {
+          console.log("📊 Отправляем запрос на статистику поисковых кластеров...");
+          
+          const resNormQuery = await fetch('/api/wb/normquery-stats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, dateFrom: rkDateFrom, dateTo: rkDateTo, ids: cpmCampaignIds }),
+          });
+
+          console.log("📊 Ответ от normquery-stats:", resNormQuery.status, resNormQuery.ok);
+
+          if (resNormQuery.ok) {
+            const normQueryData: { fields: string[]; rows: Record<string, unknown>[] } = await resNormQuery.json();
+            console.log(`✅ Получена статистика поисковых кластеров: ${normQueryData.rows?.length || 0} строк`);
+            
+            if (normQueryData.fields && normQueryData.fields.length > 0) {
+              normQueryHeader = normQueryData.fields;
+            }
+            if (normQueryData.rows && normQueryData.rows.length > 0) {
+              normQueryRows = normQueryData.rows.map((row: Record<string, unknown>) => 
+                normQueryHeader.map((key: string) => {
+                  const value = row[key];
+                  // Безопасная конвертация значений для Excel
+                  if (value === null || value === undefined) return '';
+                  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                    return value;
+                  }
+                  if (typeof value === 'object') {
+                    // Если это объект или массив, конвертируем в JSON строку
+                    try {
+                      const jsonStr = JSON.stringify(value);
+                      // Если JSON слишком длинный, обрезаем
+                      return jsonStr.length > 32000 ? jsonStr.substring(0, 31980) + '... (обрезано)' : jsonStr;
+                    } catch {
+                      return String(value);
+                    }
+                  }
+                  return String(value);
+                })
+              );
+            } else {
+              normQueryRows = [['Нет данных по поисковым кластерам', '']];
+            }
+          } else {
+            const err = await resNormQuery.json().catch(() => ({} as any));
+            console.error('❌ Ошибка получения статистики поисковых кластеров:', err?.error || resNormQuery.status);
+            normQueryRows = [[`Ошибка загрузки: ${err?.error || resNormQuery.status}`, '']];
+          }
+        } else {
+          console.warn('⚠️ Нет кампаний для загрузки статистики поисковых кластеров');
+          normQueryRows = [['Нет активных кампаний для статистики', '']];
+        }
+      } catch (normQueryErr) {
+        console.error('❌ Критическая ошибка при построении листа "Статистика поисковых кластеров":', normQueryErr);
+        normQueryRows = [[`Ошибка: ${(normQueryErr as Error).message || 'Неизвестная ошибка'}`, '']];
+      }
+      
+      // Создаем лист ВСЕГДА
+      const normQuerySheet = XLSX.utils.aoa_to_sheet([normQueryHeader, ...normQueryRows]);
+      normQuerySheet['!cols'] = normQueryHeader.map(() => ({ wch: 20 }));
+      XLSX.utils.book_append_sheet(workbook, normQuerySheet, 'Статистика поисковых кластеров');
+      console.log('✅ Лист "Статистика поисковых кластеров" добавлен в книгу');
+
+      // Генерация и скачивание файла
+      const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([arrayBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `РК_${rkDateFrom}_${rkDateTo}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      
+      console.log("✅ Файл РК успешно скачан");
+    } catch (error) {
+      console.error("❌ Ошибка при выгрузке РК:", error);
+      
+      let userFriendlyMessage = "Произошла ошибка при загрузке данных РК";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
+          userFriendlyMessage = "Ошибка сети. Проверьте подключение к интернету";
+        } else if (error.message.includes("401") || error.message.includes("авторизац")) {
+          userFriendlyMessage = "Ошибка авторизации. Проверьте правильность токена";
+        } else if (error.message.includes("429")) {
+          userFriendlyMessage = "Превышен лимит запросов. Попробуйте через минуту";
+        } else if (error.message.includes("500")) {
+          userFriendlyMessage = "Внутренняя ошибка сервера Wildberries. Попробуйте позже";
+        } else {
+          userFriendlyMessage = error.message;
+        }
+      }
+      
+      alert(userFriendlyMessage);
+    } finally {
+      setIsLoadingRk(false);
+    }
+  };
+
   const handleDownload = async () => {
     try {
       setIsLoadingReport(true);
@@ -2188,6 +2627,67 @@ export default function Home() {
                     </span>
                   ) : (
                     "Анализ поставок"
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Секция Выгрузка РК */}
+            <div className="pt-4 border-t border-black/[.08] dark:border-white/[.145]">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-lg font-semibold">Выгрузка РК</h3>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Отчет по рекламным кампаниям
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium">Период для выгрузки РК:</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="rk-date-from" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                        От даты
+                      </label>
+                      <input
+                        id="rk-date-from"
+                        type="date"
+                        value={rkDateFrom}
+                        onChange={(e) => setRkDateFrom(e.target.value)}
+                        className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="rk-date-to" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                        До даты
+                      </label>
+                      <input
+                        id="rk-date-to"
+                        type="date"
+                        value={rkDateTo}
+                        onChange={(e) => setRkDateTo(e.target.value)}
+                        className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                      />
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Выгрузка данных рекламных кампаний за выбранный период
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRkDownload}
+                  disabled={isLoadingRk}
+                  className={`w-full h-11 rounded-lg bg-purple-600 text-white dark:bg-purple-500 dark:text-white font-medium transition-opacity ${
+                    isLoadingRk ? "opacity-60 cursor-not-allowed" : "hover:opacity-90"
+                  }`}
+                >
+                  {isLoadingRk ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                      Загрузка...
+                    </span>
+                  ) : (
+                    "Выгрузка РК"
                   )}
                 </button>
               </div>
