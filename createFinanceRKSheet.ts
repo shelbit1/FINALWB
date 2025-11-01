@@ -63,6 +63,13 @@ export async function createFinanceRKSheet(workbook: ExcelJS.Workbook, apiKey: s
 export async function generateFinanceRKXlsx(apiKey: string, startDate: string, endDate: string): Promise<ArrayBuffer> {
   const wb = new ExcelJS.Workbook();
   await createFinanceRKSheet(wb, apiKey, startDate, endDate);
+  // Добавляем служебный лист со значениями для выпадающих списков/подсказок
+  const valuesSheet = wb.addWorksheet('Значения');
+  valuesSheet.getCell('A1').value = 'названия';
+  valuesSheet.getCell('A2').value = 'Аукцион';
+  valuesSheet.getCell('A3').value = 'автоматическая';
+  valuesSheet.getCell('B1').value = 'ручная';
+  valuesSheet.getCell('B2').value = 'единая';
   return wb.xlsx.writeBuffer();
 }
 
