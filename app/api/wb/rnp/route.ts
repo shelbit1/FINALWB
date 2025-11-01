@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
-// Тип для данных РНП (не используется явно, но определяет структуру)
+// Тип для данных РНП (используется для документации структуры)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type RnpItemStructure = {
   realizationreport_id: number;
   date_from: string;

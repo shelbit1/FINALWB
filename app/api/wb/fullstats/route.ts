@@ -213,7 +213,12 @@ export async function POST(request: NextRequest) {
         else items = Object.values(maybe);
       }
 
-      allStats.push(...items);
+      // Фильтруем и добавляем только объекты
+      items.forEach(item => {
+        if (typeof item === 'object' && item !== null) {
+          allStats.push(item as Record<string, unknown>);
+        }
+      });
 
       // Соблюдаем лимиты API: до 3 запросов в минуту, всплеск 1 запрос
       if (i < batches.length - 1) {
