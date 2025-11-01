@@ -73,8 +73,6 @@ export default function Home() {
   // Состояния для РНП (один день)
   const [rnpDate, setRnpDate] = useState("");
   const [isLoadingRnp, setIsLoadingRnp] = useState(false);
-  const [isLoadingRemains, setIsLoadingRemains] = useState(false);
-  const [isLoadingRemainsRnp, setIsLoadingRemainsRnp] = useState(false);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   
   // Состояния для выгрузки РК
@@ -748,9 +746,11 @@ export default function Home() {
     }
   };
 
-  const handleRemainsDownload = async () => {
+  // Функция временно отключена
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleRemainsDownload = async () => {
     try {
-      setIsLoadingRemains(true);
+      // setIsLoadingRemains(true);
       
       // Валидация токена
       if (!token.trim()) {
@@ -844,13 +844,15 @@ export default function Home() {
       
       alert(userFriendlyMessage);
     } finally {
-      setIsLoadingRemains(false);
+      // setIsLoadingRemains(false);
     }
   };
 
-  const handleRemainsRnpDownload = async () => {
+  // Функция временно отключена
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleRemainsRnpDownload = async () => {
     try {
-      setIsLoadingRemainsRnp(true);
+      // setIsLoadingRemainsRnp(true);
       
       // Валидация токена
       if (!token.trim()) {
@@ -993,7 +995,7 @@ export default function Home() {
       
       alert(userFriendlyMessage);
     } finally {
-      setIsLoadingRemainsRnp(false);
+      // setIsLoadingRemainsRnp(false);
     }
   };
 
@@ -1684,7 +1686,7 @@ export default function Home() {
               statsRows = [['Нет данных за выбранный период', '', '', '', '']];
             }
           } else {
-            const err = await resStats.json().catch(() => ({} as any));
+            const err = await resStats.json().catch(() => ({} as Record<string, unknown>));
             console.error('❌ Ошибка получения статистики:', err?.error || resStats.status);
             statsRows = [[`Ошибка загрузки: ${err?.error || resStats.status}`, '', '', '', '']];
           }
@@ -1792,7 +1794,7 @@ export default function Home() {
               clusterRows = [['Нет данных по кластерам фраз', '']];
             }
           } else {
-            const err = await resCluster.json().catch(() => ({} as any));
+            const err = await resCluster.json().catch(() => ({} as Record<string, unknown>));
             console.error('❌ Ошибка получения статистики по кластерам:', err?.error || resCluster.status);
             clusterRows = [[`Ошибка загрузки: ${err?.error || resCluster.status}`, '']];
           }
@@ -1883,7 +1885,7 @@ export default function Home() {
               normQueryRows = [['Нет данных по поисковым кластерам', '']];
             }
           } else {
-            const err = await resNormQuery.json().catch(() => ({} as any));
+            const err = await resNormQuery.json().catch(() => ({} as Record<string, unknown>));
             console.error('❌ Ошибка получения статистики поисковых кластеров:', err?.error || resNormQuery.status);
             normQueryRows = [[`Ошибка загрузки: ${err?.error || resNormQuery.status}`, '']];
           }

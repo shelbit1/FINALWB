@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const allStats: any[] = [];
+    const allStats: Record<string, unknown>[] = [];
 
     // Лимит: 4 запроса в секунду (250 миллисекунд между запросами)
     for (let i = 0; i < ids.length; i++) {
@@ -42,21 +42,26 @@ export async function POST(request: NextRequest) {
           
           // Добавляем campaignId к каждой записи
           if (Array.isArray(json)) {
-            json.forEach((item: any) => {
-              allStats.push({
-                campaignId,
-                ...item
-              });
+            json.forEach((item: unknown) => {
+              if (typeof item === 'object' && item !== null) {
+                allStats.push({
+                  campaignId,
+                  ...(item as Record<string, unknown>)
+                });
+              }
             });
           } else if (json && typeof json === 'object') {
             // Если это объект, пробуем найти массив внутри
-            const data = (json as any).data || (json as any).keywords || json;
+            const jsonObj = json as Record<string, unknown>;
+            const data = jsonObj.data || jsonObj.keywords || json;
             if (Array.isArray(data)) {
-              data.forEach((item: any) => {
-                allStats.push({
-                  campaignId,
-                  ...item
-                });
+              data.forEach((item: unknown) => {
+                if (typeof item === 'object' && item !== null) {
+                  allStats.push({
+                    campaignId,
+                    ...(item as Record<string, unknown>)
+                  });
+                }
               });
             } else {
               allStats.push({

@@ -65,7 +65,7 @@ interface SalesFunnelResponse {
   };
   error: boolean;
   errorText: string;
-  additionalErrors: any[];
+  additionalErrors: unknown[];
 }
 
 /**

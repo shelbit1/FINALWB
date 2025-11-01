@@ -1,7 +1,7 @@
 export const runtime = "nodejs";
 
-// Интерфейс для данных РНП
-interface RnpItem {
+// Тип для данных РНП (не используется явно, но определяет структуру)
+type RnpItemStructure = {
   realizationreport_id: number;
   date_from: string;
   date_to: string;

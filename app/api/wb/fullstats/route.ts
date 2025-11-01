@@ -24,13 +24,13 @@ function safeStringify(value: unknown): string | number {
   
   if (typeof value === 'object') {
     try {
-      let jsonString = JSON.stringify(value);
+      const jsonString = JSON.stringify(value);
       if (jsonString.length > MAX_EXCEL_CELL_LENGTH) {
         return jsonString.substring(0, MAX_EXCEL_CELL_LENGTH - 20) + '... (обрезано)';
       }
       return jsonString;
     } catch {
-      let strValue = String(value);
+      const strValue = String(value);
       if (strValue.length > MAX_EXCEL_CELL_LENGTH) {
         return strValue.substring(0, MAX_EXCEL_CELL_LENGTH - 20) + '... (обрезано)';
       }
@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
     // Бьем ids на чанки по 100 (ограничение метода)
     const batches = chunkArray(Array.from(new Set(ids)), 100);
 
-    const allStats: any[] = [];
+    const allStats: Record<string, unknown>[] = [];
 
     for (let i = 0; i < batches.length; i++) {
       const batchIds = batches[i];
@@ -204,12 +204,12 @@ export async function POST(request: NextRequest) {
       const json = (await res.json()) as StatsApiResponse;
 
       // Приводим ответ к единому виду массива кампаний
-      let items: any[] = [];
-      if (Array.isArray(json)) items = json as any[];
+      let items: unknown[] = [];
+      if (Array.isArray(json)) items = json;
       else if (json && typeof json === 'object') {
         const maybe = (json as Record<string, unknown>);
-        if (Array.isArray(maybe.data)) items = maybe.data as any[];
-        else if (Array.isArray((maybe as any).adverts)) items = (maybe as any).adverts as any[];
+        if (Array.isArray(maybe.data)) items = maybe.data;
+        else if (Array.isArray(maybe.adverts)) items = maybe.adverts as unknown[];
         else items = Object.values(maybe);
       }
 

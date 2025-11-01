@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const allStats: any[] = [];
+    const allStats: Record<string, unknown>[] = [];
 
     // Лимит: 10 запросов в минуту (6 секунд между запросами)
     // API поддерживает до 100 items в одном запросе
@@ -62,7 +62,8 @@ export async function POST(request: NextRequest) {
             allStats.push(...json);
           } else if (json && typeof json === 'object') {
             // Если это объект, пробуем найти массив внутри
-            const data = (json as any).data || (json as any).stats || (json as any).items || json;
+            const jsonObj = json as Record<string, unknown>;
+            const data = jsonObj.data || jsonObj.stats || jsonObj.items || json;
             if (Array.isArray(data)) {
               allStats.push(...data);
             } else {
