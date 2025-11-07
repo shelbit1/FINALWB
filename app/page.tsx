@@ -560,6 +560,38 @@ export default function Home() {
       const rnpColWidths = Array(rnpHeader.length).fill({ wch: 12 });
       rnpSheet["!cols"] = rnpColWidths;
 
+      // Лист "Аналитика без размеров" на основе данных Номенклатуры
+      const analyticsNoSizeData: unknown[][] = [
+        [], // пустая строка 1
+        []  // пустая строка 2
+      ];
+
+      // Формируем строки из Номенклатуры: A - Артикул продавца, B - Артикул WB (ID товара), C - Бренд
+      const noSizeUniq = new Set<string>();
+      nomenclature.rows.forEach((row: Record<string, unknown>) => {
+        const vendorCode = String(row["Артикул продавца"] ?? "").trim();
+        const nmId = String(row["ID товара"] ?? "").trim();
+        const brand = String(row["Бренд"] ?? "").trim();
+        
+        // Пропускаем строки с пустым артикулом продавца
+        if (!vendorCode || vendorCode === "null" || vendorCode === "undefined") {
+          return;
+        }
+        
+        const key = `${vendorCode}|${nmId}|${brand}`;
+        if (!noSizeUniq.has(key)) {
+          noSizeUniq.add(key);
+          analyticsNoSizeData.push([vendorCode, nmId, brand]);
+        }
+      });
+
+      const analyticsNoSizeSheet = XLSX.utils.aoa_to_sheet(analyticsNoSizeData);
+      analyticsNoSizeSheet["!cols"] = [
+        { wch: 20 }, // Артикул продавца
+        { wch: 14 }, // Артикул WB
+        { wch: 20 }  // Бренд
+      ];
+
       // Лист платного хранения
       const paidHeader = paid.fields;
       const paidRows = paid.rows.map((row) => paidHeader.map((key) => row[key] ?? ""));
@@ -704,6 +736,7 @@ export default function Home() {
 
       // Добавляем все листы в книгу (Аналитика по товарам идет первой)
       XLSX.utils.book_append_sheet(workbook, productAnalyticsSheet, "Аналитика по товарам");
+      XLSX.utils.book_append_sheet(workbook, analyticsNoSizeSheet, "Аналитика без размеров");
       XLSX.utils.book_append_sheet(workbook, rnpSheet, "РНП");
       XLSX.utils.book_append_sheet(workbook, paidSheet, "Платное хранение");
       XLSX.utils.book_append_sheet(workbook, acceptanceSheet, "Платная приемка");
@@ -908,6 +941,22 @@ export default function Home() {
       const rnpData = await resRnp.json();
       console.log("✅ Данные РНП получены:", rnpData.rows?.length || 0, "строк");
 
+      // Запрос номенклатуры для листа "Аналитика без размеров"
+      console.log("📊 Загрузка номенклатуры...");
+      const resNomenclature = await fetch("/api/wb/nomenclature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      if (!resNomenclature.ok) {
+        const errorData = await resNomenclature.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении номенклатуры");
+      }
+
+      const nomenclatureData = await resNomenclature.json();
+      console.log("✅ Номенклатура получена:", nomenclatureData.rows?.length || 0, "строк");
+
       // Создание Excel файла
       const workbook = XLSX.utils.book_new();
       
@@ -956,6 +1005,39 @@ export default function Home() {
       rnpSheet["!cols"] = rnpColWidths;
 
       XLSX.utils.book_append_sheet(workbook, rnpSheet, "РНП");
+
+      // Добавляем лист "Аналитика без размеров" на основе данных Номенклатуры
+      const analyticsNoSizeData: unknown[][] = [
+        [], // пустая строка 1
+        []  // пустая строка 2
+      ];
+
+      // Формируем строки из Номенклатуры: A - Артикул продавца, B - Артикул WB (ID товара), C - Бренд
+      const noSizeUniq = new Set<string>();
+      (nomenclatureData.rows || []).forEach((row: Record<string, unknown>) => {
+        const vendorCode = String(row["Артикул продавца"] ?? "").trim();
+        const nmId = String(row["ID товара"] ?? "").trim();
+        const brand = String(row["Бренд"] ?? "").trim();
+        
+        // Пропускаем строки с пустым артикулом продавца
+        if (!vendorCode || vendorCode === "null" || vendorCode === "undefined") {
+          return;
+        }
+        
+        const key = `${vendorCode}|${nmId}|${brand}`;
+        if (!noSizeUniq.has(key)) {
+          noSizeUniq.add(key);
+          analyticsNoSizeData.push([vendorCode, nmId, brand]);
+        }
+      });
+
+      const analyticsNoSizeSheet = XLSX.utils.aoa_to_sheet(analyticsNoSizeData);
+      analyticsNoSizeSheet["!cols"] = [
+        { wch: 20 }, // Артикул продавца
+        { wch: 14 }, // Артикул WB
+        { wch: 20 }  // Бренд
+      ];
+      XLSX.utils.book_append_sheet(workbook, analyticsNoSizeSheet, "Аналитика без размеров");
 
       // Генерация и скачивание файла
       const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
@@ -1930,6 +2012,15 @@ export default function Home() {
       const analyticsGeneralSheet = createAnalyticsSheet();
       const analyticsAutoSheet = createAnalyticsSheet();
       const analyticsManualSheet = createAnalyticsSheet();
+      
+      // Добавляем лист "Значения" для справочной информации
+      const valuesSheet = XLSX.utils.aoa_to_sheet([
+        ['названия'],
+        ['Аукцион', 'ручная'],
+        ['автоматическая', 'единая']
+      ]);
+      XLSX.utils.book_append_sheet(workbook, valuesSheet, 'Значения');
+      console.log('✅ Лист "Значения" добавлен в книгу');
       
       // Пересобираем workbook с правильным порядком листов
       // Создаем новый workbook и добавляем листы в нужном порядке
