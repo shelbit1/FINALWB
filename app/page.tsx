@@ -1505,7 +1505,14 @@ export default function Home() {
         ["Крыловская"],
         ["Волгоград"],
         ["Невинномысск"],
-        ["Краснодар"]
+        ["Краснодар"],
+        [], // Строка 63 (пустая)
+        ["Северо-Западный"], // Строка 64
+        ["СЦ Вологда 2"],
+        ["СЦ Шушары"],
+        ["Санкт-Петербург СГТ"],
+        ["СПБ Шушары"],
+        ["Санкт-Петербург Уткина Заводь"]
       ];
       
       const valuesSheet = XLSX.utils.aoa_to_sheet(valuesData);
@@ -1612,6 +1619,34 @@ export default function Home() {
         detailedCampaigns?: Array<Record<string, unknown>>
       } = await resCampaigns.json();
       console.log("✅ Данные рекламных кампаний получены:", campaignsData.rows?.length || 0, "строк");
+      
+      // Загружаем номенклатуру для сопоставления артикулов
+      console.log("📊 Загрузка номенклатуры для сопоставления артикулов...");
+      const resNomenclature = await fetch("/api/wb/nomenclature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      let nmIdToVendorCodeMap = new Map<string, string>();
+      
+      if (resNomenclature.ok) {
+        const nomenclature = await resNomenclature.json();
+        console.log("✅ Номенклатура получена:", nomenclature.rows?.length || 0, "строк");
+        
+        // Создаем mapping: nmId (артикул WB) -> vendorCode (артикул продавца)
+        (nomenclature.rows || []).forEach((row: Record<string, unknown>) => {
+          const nmId = String(row["ID товара"] || "");
+          const vendorCode = String(row["Артикул продавца"] || "");
+          if (nmId && vendorCode) {
+            nmIdToVendorCodeMap.set(nmId, vendorCode);
+          }
+        });
+        
+        console.log(`📊 Создан mapping для ${nmIdToVendorCodeMap.size} артикулов`);
+      } else {
+        console.warn("⚠️ Не удалось загрузить номенклатуру, артикулы продавца не будут заполнены");
+      }
       
       // Создаем Excel файл
       const workbook = XLSX.utils.book_new();
@@ -1995,16 +2030,20 @@ export default function Home() {
           [rkDateFrom], // A1 - дата начала
           [rkDateTo],   // A2 - дата конца
           [],           // A3 - пустая строка
-          ['Артикул WB'], // A4 - заголовок
+          ['Артикул WB', 'Артикул продавца'], // A4, B4 - заголовки
         ];
         
-        // Добавляем уникальные SKU ID начиная с A5
+        // Добавляем уникальные SKU ID начиная с A5, с соответствующими артикулами продавца в B5+
         uniqueSkuArray.forEach(sku => {
-          analyticsData.push([sku]);
+          const vendorCode = nmIdToVendorCodeMap.get(sku) || ''; // Получаем артикул продавца из mapping
+          analyticsData.push([sku, vendorCode]);
         });
         
         const sheet = XLSX.utils.aoa_to_sheet(analyticsData);
-        sheet['!cols'] = [{ wch: 20 }]; // Ширина столбца A
+        sheet['!cols'] = [
+          { wch: 20 }, // Ширина столбца A
+          { wch: 20 }  // Ширина столбца B
+        ];
         
         return sheet;
       };
