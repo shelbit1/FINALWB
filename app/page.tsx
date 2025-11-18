@@ -1443,7 +1443,13 @@ export default function Home() {
       ordersSheet["!cols"] = ordersColWidths;
       XLSX.utils.book_append_sheet(workbook, ordersSheet, "Заказы");
 
-      // Лист 6: Значения (параметры) - последний лист
+      // Лист 6: Тест заказы (дубликат заказов для тестирования)
+      const testOrdersSheet = XLSX.utils.aoa_to_sheet([ordersHeader, ...ordersRows]);
+      testOrdersSheet["!cols"] = ordersColWidths; // Используем те же настройки колонок
+      XLSX.utils.book_append_sheet(workbook, testOrdersSheet, "Тест заказы");
+      console.log('✅ Лист "Тест заказы" добавлен в книгу');
+
+      // Лист 7: Значения (параметры) - последний лист
       const coeffValue = coefficient ? parseFloat(coefficient) : 0;
       const deliveryValue = delivery; // Срок поставки уже распарсен выше
       const stockValue = stock; // Запас уже распарсен выше
