@@ -84,6 +84,11 @@ export default function Home() {
   const [deliveryDays, setDeliveryDays] = useState("");
   const [stockDays, setStockDays] = useState("");
   const [coefficient, setCoefficient] = useState("");
+  
+  // Состояния для тестовых заказов
+  const [testOrdersDateFrom, setTestOrdersDateFrom] = useState("");
+  const [testOrdersDateTo, setTestOrdersDateTo] = useState("");
+  const [isLoadingTestOrders, setIsLoadingTestOrders] = useState(false);
 
   // Функция для обработки выбора понедельника
   const handleMondayChange = (mondayDate: string) => {
@@ -2616,6 +2621,125 @@ export default function Home() {
     }
   };
 
+  const handleTestOrdersDownload = async () => {
+    try {
+      setIsLoadingTestOrders(true);
+      
+      // Валидация данных
+      if (!token.trim()) {
+        alert("Введите API токен Wildberries");
+        return;
+      }
+      
+      if (!testOrdersDateFrom || !testOrdersDateTo) {
+        alert("Выберите период для выгрузки тестовых заказов (от даты и до даты)");
+        return;
+      }
+      
+      const dateFrom = new Date(testOrdersDateFrom);
+      const dateTo = new Date(testOrdersDateTo);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      
+      if (dateFrom > dateTo) {
+        alert("Дата начала периода не может быть позже даты окончания");
+        return;
+      }
+      
+      if (dateTo > today) {
+        alert("Дата окончания периода не может быть в будущем");
+        return;
+      }
+      
+      console.log("📦 Загрузка тестовых заказов за период:", testOrdersDateFrom, "-", testOrdersDateTo);
+      
+      // Запрос заказов через API
+      const resOrders = await fetch("/api/wb/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          token, 
+          dateFrom: testOrdersDateFrom, 
+          dateTo: testOrdersDateTo 
+        }),
+      });
+
+      if (!resOrders.ok) {
+        const errorData = await resOrders.json().catch(() => ({}));
+        throw new Error(errorData.error || "Ошибка при получении заказов");
+      }
+
+      const ordersData: { 
+        fields: string[]; 
+        rows: Record<string, unknown>[] 
+      } = await resOrders.json();
+      
+      console.log("✅ Получено заказов:", ordersData.rows?.length || 0);
+
+      // Создаем Excel файл
+      const workbook = XLSX.utils.book_new();
+      
+      // Лист с заказами
+      const ordersHeader = ordersData.fields || [];
+      const ordersRows = (ordersData.rows || []).map((row: Record<string, unknown>) => 
+        ordersHeader.map((key: string) => row[key] ?? "")
+      );
+      const ordersSheet = XLSX.utils.aoa_to_sheet([ordersHeader, ...ordersRows]);
+      
+      // Настройка ширины колонок
+      const ordersColWidths = [
+        { wch: 12 }, { wch: 18 }, { wch: 20 }, { wch: 15 }, { wch: 15 },
+        { wch: 20 }, { wch: 15 }, { wch: 20 }, { wch: 12 }, { wch: 15 },
+        { wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 12 },
+        { wch: 10 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 10 },
+        { wch: 18 }, { wch: 15 }, { wch: 10 }, { wch: 18 }, { wch: 15 },
+        { wch: 15 }, { wch: 20 }, { wch: 35 }, { wch: 12 }
+      ];
+      ordersSheet["!cols"] = ordersColWidths;
+      
+      XLSX.utils.book_append_sheet(workbook, ordersSheet, "Тест заказы");
+
+      // Генерация и скачивание файла
+      const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([arrayBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Тест_заказы_${testOrdersDateFrom}_${testOrdersDateTo}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      console.log("✅ Файл тестовых заказов успешно скачан");
+      alert(`Выгрузка завершена!\n\nПолучено заказов: ${ordersData.rows?.length || 0}`);
+    } catch (error) {
+      console.error("❌ Ошибка при выгрузке тестовых заказов:", error);
+      
+      let userFriendlyMessage = "Произошла ошибка при загрузке тестовых заказов";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
+          userFriendlyMessage = "Ошибка сети. Проверьте подключение к интернету";
+        } else if (error.message.includes("401") || error.message.includes("авторизац")) {
+          userFriendlyMessage = "Ошибка авторизации. Проверьте правильность токена";
+        } else if (error.message.includes("429")) {
+          userFriendlyMessage = "Превышен лимит запросов. Попробуйте через минуту";
+        } else if (error.message.includes("500")) {
+          userFriendlyMessage = "Внутренняя ошибка сервера Wildberries. Попробуйте позже";
+        } else {
+          userFriendlyMessage = error.message;
+        }
+      }
+      
+      alert(userFriendlyMessage);
+    } finally {
+      setIsLoadingTestOrders(false);
+    }
+  };
+
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-6">
       <div className="w-full max-w-xl rounded-2xl border border-black/[.08] dark:border-white/[.145] p-6 bg-white dark:bg-[#0f0f0f]">
@@ -2897,6 +3021,67 @@ export default function Home() {
                     </span>
                   ) : (
                     "Выгрузка РК"
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Секция Тест заказы */}
+            <div className="pt-4 border-t border-black/[.08] dark:border-white/[.145]">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-lg font-semibold">Тест заказы</h3>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Тестовая выгрузка заказов из Wildberries
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium">Период для тестовых заказов:</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="test-orders-date-from" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                        От даты
+                      </label>
+                      <input
+                        id="test-orders-date-from"
+                        type="date"
+                        value={testOrdersDateFrom}
+                        onChange={(e) => setTestOrdersDateFrom(e.target.value)}
+                        className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="test-orders-date-to" className="text-xs text-black/60 dark:text-white/70 block mb-1">
+                        До даты
+                      </label>
+                      <input
+                        id="test-orders-date-to"
+                        type="date"
+                        value={testOrdersDateTo}
+                        onChange={(e) => setTestOrdersDateTo(e.target.value)}
+                        className="w-full h-11 rounded-lg border border-black/[.12] dark:border-white/[.18] bg-transparent px-3 outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                      />
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    Выгрузка тестовых заказов за выбранный период (лимит: 1 запрос в минуту)
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleTestOrdersDownload}
+                  disabled={isLoadingTestOrders}
+                  className={`w-full h-11 rounded-lg bg-orange-600 text-white dark:bg-orange-500 dark:text-white font-medium transition-opacity ${
+                    isLoadingTestOrders ? "opacity-60 cursor-not-allowed" : "hover:opacity-90"
+                  }`}
+                >
+                  {isLoadingTestOrders ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                      Загрузка...
+                    </span>
+                  ) : (
+                    "Скачать тест заказы"
                   )}
                 </button>
               </div>
