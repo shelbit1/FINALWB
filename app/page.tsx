@@ -1628,7 +1628,7 @@ export default function Home() {
         body: JSON.stringify({ token }),
       });
 
-      let nmIdToVendorCodeMap = new Map<string, string>();
+      const nmIdToVendorCodeMap = new Map<string, string>();
       
       if (resNomenclature.ok) {
         const nomenclature = await resNomenclature.json();
