@@ -1628,6 +1628,7 @@ export default function Home() {
         body: JSON.stringify({ token }),
       });
 
+      // Mapping артикулов WB к артикулам продавца
       const nmIdToVendorCodeMap = new Map<string, string>();
       
       if (resNomenclature.ok) {
