@@ -41,7 +41,10 @@ interface OrderData {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token, dateFrom, dateTo, flag = 0 } = body;
+    const { token: requestToken, dateFrom, dateTo, flag = 0 } = body;
+
+    // Используем токен из запроса или из переменных окружения
+    const token = requestToken || process.env.WB_API_TOKEN;
 
     if (!token || !dateFrom) {
       return NextResponse.json(

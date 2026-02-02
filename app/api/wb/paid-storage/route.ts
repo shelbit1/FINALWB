@@ -4,11 +4,14 @@ type PaidStorageRow = Record<string, unknown>;
 
 export async function POST(request: Request) {
   try {
-    const { token, dateFrom, dateTo } = (await request.json()) as {
+    const { token: requestToken, dateFrom, dateTo } = (await request.json()) as {
       token?: string;
       dateFrom?: string; // YYYY-MM-DD
       dateTo?: string; // YYYY-MM-DD
     };
+
+    // Используем токен из запроса или из переменных окружения
+    const token = requestToken || process.env.WB_API_TOKEN;
 
     if (!token || !dateFrom || !dateTo) {
       return new Response(

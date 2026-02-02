@@ -18,7 +18,10 @@ interface Campaign {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token } = body;
+    const { token: requestToken } = body;
+
+    // Используем токен из запроса или из переменных окружения
+    const token = requestToken || process.env.WB_API_TOKEN;
 
     if (!token) {
       return NextResponse.json({ 

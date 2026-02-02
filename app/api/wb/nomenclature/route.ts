@@ -62,9 +62,12 @@ interface NomenclatureResponse {
 
 export async function POST(request: Request) {
   try {
-    const { token } = (await request.json()) as {
+    const { token: requestToken } = (await request.json()) as {
       token?: string;
     };
+
+    // Используем токен из запроса или из переменных окружения
+    const token = requestToken || process.env.WB_API_TOKEN;
 
     if (!token) {
       return new Response(

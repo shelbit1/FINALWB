@@ -9,12 +9,15 @@ function sleep(ms: number) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token, dateFrom, dateTo, ids } = body as {
+    const { token: requestToken, dateFrom, dateTo, ids } = body as {
       token?: string;
       dateFrom?: string;
       dateTo?: string;
       ids?: number[];
     };
+
+    // Используем токен из запроса или из переменных окружения
+    const token = requestToken || process.env.WB_API_TOKEN;
 
     if (!token || !dateFrom || !dateTo || !Array.isArray(ids) || ids.length === 0) {
       return NextResponse.json({
