@@ -181,9 +181,10 @@ export async function POST(request: Request) {
     console.log(`🚀 Начало получения данных РНП (ежедневные отчеты): ${dateFrom} - ${dateTo}`);
 
     const endpoint = "https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod";
-    const limit = 30000;
+    const limit = 10000; // Уменьшаем лимит для более стабильной работы
     let rrdid = 0;
     const result: Record<string, unknown>[] = [];
+    const maxRetries = 3; // Максимальное количество повторных попыток
 
     // Пагинация по rrdid для получения всех данных с параметром period=daily
     while (true) {
@@ -195,53 +196,94 @@ export async function POST(request: Request) {
         period: "daily", // Используем ежедневные отчеты для детализации
       });
 
-      console.log(`📊 Запрос РНП данных (daily) с rrdid: ${rrdid}`);
+      console.log(`📊 Запрос РНП данных (daily) с rrdid: ${rrdid}, лимит: ${limit}`);
 
-      const res = await fetch(`${endpoint}?${params.toString()}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        cache: "no-store",
-      });
+      let res: Response | null = null;
+      let responseText = '';
+      let retryCount = 0;
+      let dataUnknown: unknown = null;
 
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`❌ Ошибка API РНП: ${res.status}`, text);
-        return new Response(
-          JSON.stringify({ error: text || `WB error ${res.status}` }),
-          { status: res.status, headers: { "Content-Type": "application/json" } }
-        );
+      // Повторные попытки при ошибках
+      while (retryCount < maxRetries) {
+        try {
+          res = await fetch(`${endpoint}?${params.toString()}`, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            cache: "no-store",
+            signal: AbortSignal.timeout(60000), // Таймаут 60 секунд
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            console.error(`❌ Ошибка API РНП: ${res.status}`, text);
+            
+            // Если ошибка авторизации или клиентская - не повторяем
+            if (res.status >= 400 && res.status < 500) {
+              return new Response(
+                JSON.stringify({ error: text || `WB error ${res.status}` }),
+                { status: res.status, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            
+            // Для серверных ошибок - повторяем
+            throw new Error(`Server error ${res.status}`);
+          }
+
+          // Получаем текст ответа
+          responseText = await res.text();
+          console.log(`📊 Получен ответ от API РНП, длина: ${responseText.length} символов`);
+          
+          // Проверяем, что ответ не пустой
+          if (!responseText || responseText.trim() === '') {
+            console.log(`✅ Получен пустой ответ - завершаем пагинацию. Всего записей: ${result.length}`);
+            break;
+          }
+          
+          // Пытаемся распарсить JSON
+          dataUnknown = JSON.parse(responseText);
+          
+          // Успешно распарсили - выходим из цикла повторов
+          break;
+          
+        } catch (error) {
+          retryCount++;
+          console.error(`❌ Попытка ${retryCount}/${maxRetries} не удалась:`, error);
+          
+          if (retryCount < maxRetries) {
+            // Ждем перед следующей попыткой (экспоненциальная задержка)
+            const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+            console.log(`⏳ Ожидание ${delay}мс перед повторной попыткой...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            // Все попытки исчерпаны
+            console.error(`❌ Все ${maxRetries} попыток исчерпаны`);
+            console.error(`Первые 500 символов ответа: ${responseText.substring(0, 500)}`);
+            
+            // Если это первый запрос и все попытки не удались, возвращаем ошибку
+            if (result.length === 0) {
+              return new Response(
+                JSON.stringify({ error: "Ошибка получения данных от API Wildberries после нескольких попыток" }),
+                { status: 500, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            
+            // Если уже есть данные, просто завершаем пагинацию
+            console.log(`⚠️ Не удалось получить данные, но есть ${result.length} записей - завершаем`);
+            break;
+          }
+        }
       }
-
-      // Получаем текст ответа для дополнительного логирования
-      const responseText = await res.text();
-      console.log(`📊 Получен ответ от API РНП, длина: ${responseText.length} символов`);
       
-      // Проверяем, что ответ не пустой
+      // Если вышли из while из-за пустого ответа
       if (!responseText || responseText.trim() === '') {
-        console.log(`✅ Получен пустой ответ - завершаем пагинацию. Всего записей: ${result.length}`);
         break;
       }
       
-      let dataUnknown: unknown;
-      try {
-        dataUnknown = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error(`❌ Ошибка парсинга JSON РНП:`, parseError);
-        console.error(`Первые 500 символов ответа: ${responseText.substring(0, 500)}`);
-        
-        // Если это первый запрос и парсинг не удался, возвращаем ошибку
-        if (result.length === 0) {
-          return new Response(
-            JSON.stringify({ error: "Ошибка парсинга ответа от API Wildberries" }),
-            { status: 500, headers: { "Content-Type": "application/json" } }
-          );
-        }
-        
-        // Если уже есть данные, просто завершаем пагинацию
-        console.log(`⚠️ Не удалось распарсить ответ, но есть ${result.length} записей - завершаем`);
+      // Если все попытки не удались и есть данные
+      if (retryCount >= maxRetries && result.length > 0) {
         break;
       }
       if (!Array.isArray(dataUnknown) || dataUnknown.length === 0) {
@@ -265,6 +307,8 @@ export async function POST(request: Request) {
         const rrd = raw.rrd_id;
         lastRrdid = typeof rrd === "number" ? rrd : lastRrdid;
       }
+      
+      console.log(`📊 Обработано ${data.length} записей, всего накоплено: ${result.length}`);
 
       // Если rrd_id не изменился, выходим из цикла
       if (lastRrdid === rrdid) {
@@ -273,8 +317,9 @@ export async function POST(request: Request) {
       }
       rrdid = lastRrdid;
 
-      // Небольшая задержка между запросами для соблюдения лимитов API (1 запрос в минуту)
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Увеличенная задержка между запросами для стабильности (3 секунды)
+      console.log(`⏳ Ожидание 3 секунды перед следующим запросом...`);
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     // Преобразуем данные в формат для Excel с русскими заголовками

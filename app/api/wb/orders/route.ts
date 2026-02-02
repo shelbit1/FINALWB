@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
     let hasMoreData = true;
     let requestCount = 0;
     const maxRequests = 100; // Защита от бесконечного цикла
+    const maxRetries = 3; // Максимум повторных попыток
 
     // Получаем данные пакетами (максимум 80000 строк за раз)
     while (hasMoreData && requestCount < maxRequests) {
@@ -70,13 +71,50 @@ export async function POST(request: NextRequest) {
       
       console.log(`📥 Запрос ${requestCount}: ${url}`);
       
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': token,
-          'Content-Type': 'application/json'
+      let response: Response | null = null;
+      let retryCount = 0;
+      
+      // Повторные попытки при ошибках
+      while (retryCount < maxRetries) {
+        try {
+          response = await fetch(url, {
+            method: 'GET',
+            headers: {
+              'Authorization': token,
+              'Content-Type': 'application/json'
+            },
+            signal: AbortSignal.timeout(60000), // Таймаут 60 секунд
+          });
+          
+          // Успешно получили ответ - выходим из retry цикла
+          break;
+        } catch (error) {
+          retryCount++;
+          console.error(`❌ Попытка ${retryCount}/${maxRetries} запроса заказов не удалась:`, error);
+          
+          if (retryCount < maxRetries) {
+            const delay = Math.min(2000 * retryCount, 10000);
+            console.log(`⏳ Ожидание ${delay}мс перед повторной попыткой...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            // Все попытки исчерпаны
+            if (allOrdersData.length > 0) {
+              console.log(`⚠️ Не удалось получить данные после ${maxRetries} попыток, но есть ${allOrdersData.length} записей - завершаем`);
+              hasMoreData = false;
+              break;
+            }
+            return NextResponse.json(
+              { error: 'Не удалось получить данные заказов после нескольких попыток' },
+              { status: 500 }
+            );
+          }
         }
-      });
+      }
+      
+      if (!response) {
+        hasMoreData = false;
+        break;
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -123,6 +161,7 @@ export async function POST(request: NextRequest) {
       }
 
       allOrdersData.push(...data);
+      console.log(`📊 Всего накоплено заказов: ${allOrdersData.length}`);
 
       // Если получено меньше строк, чем лимит (80000), значит это последняя пачка
       if (data.length < 80000) {
