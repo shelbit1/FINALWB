@@ -1182,10 +1182,36 @@ export default function Home() {
         throw new Error(errorData.error || "Ошибка при получении заказов");
       }
 
-      const warehouseRemains = await resWarehouseRemains.json();
-      const rnpData = await resRnp.json();
-      const nomenclature = await resNomenclature.json();
-      const ordersData = await resOrders.json();
+      // Парсинг JSON с обработкой ошибок
+      let warehouseRemains, rnpData, nomenclature, ordersData;
+      
+      try {
+        warehouseRemains = await resWarehouseRemains.json();
+      } catch (error) {
+        console.error("❌ Ошибка парсинга JSON остатков:", error);
+        throw new Error("Ошибка при получении данных остатков на складах. Проверьте настройки API токена.");
+      }
+      
+      try {
+        rnpData = await resRnp.json();
+      } catch (error) {
+        console.error("❌ Ошибка парсинга JSON РНП:", error);
+        throw new Error("Ошибка при получении данных РНП. Проверьте настройки API токена.");
+      }
+      
+      try {
+        nomenclature = await resNomenclature.json();
+      } catch (error) {
+        console.error("❌ Ошибка парсинга JSON номенклатуры:", error);
+        throw new Error("Ошибка при получении номенклатуры. Проверьте настройки API токена.");
+      }
+      
+      try {
+        ordersData = await resOrders.json();
+      } catch (error) {
+        console.error("❌ Ошибка парсинга JSON заказов:", error);
+        throw new Error("Ошибка при получении данных заказов. Проверьте настройки API токена.");
+      }
       
       console.log("✅ Остатки получены:", warehouseRemains.rows?.length || 0, "строк");
       console.log("✅ РНП получены:", rnpData.rows?.length || 0, "строк");

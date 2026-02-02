@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Wildberries Analytics Platform
 
-## Getting Started
+Платформа для анализа данных Wildberries с автоматической генерацией Excel отчетов.
 
-First, run the development server:
+## Настройка
 
+### Локальная разработка
+
+1. Установите зависимости:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Создайте файл `.env.local` в корне проекта:
+```bash
+cp .env.example .env.local
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Добавьте ваш API токен Wildberries в `.env.local`:
+```
+WB_API_TOKEN=your_token_here
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Запустите проект:
+```bash
+npm run dev
+```
 
-## Learn More
+### Деплой на Railway
 
-To learn more about Next.js, take a look at the following resources:
+1. Перейдите в настройки вашего проекта на Railway
+2. Откройте вкладку **Variables**
+3. Добавьте переменную окружения:
+   - **Name**: `WB_API_TOKEN`
+   - **Value**: ваш API токен Wildberries
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. Сохраните изменения и перезапустите проект
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Получение API токена Wildberries
 
-## Deploy on Vercel
+1. Войдите в личный кабинет продавца Wildberries
+2. Перейдите в **Настройки** → **Доступ к API**
+3. Создайте новый токен или используйте существующий
+4. Скопируйте токен и добавьте его в переменные окружения
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Использование
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Без токена в переменных окружения
+Вы можете вводить токен вручную на главной странице приложения при каждом запросе.
+
+### С токеном в переменных окружения
+Токен будет использоваться автоматически для всех запросов. Вы также можете переопределить его, введя другой токен на главной странице.
+
+## Технологии
+
+- Next.js 16
+- React 19
+- TypeScript
+- ExcelJS
+- Tailwind CSS
+
+## Требования
+
+- Node.js >= 20.9.0
+- npm или yarn
