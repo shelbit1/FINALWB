@@ -145,7 +145,28 @@ export async function POST(request: Request) {
         );
       }
 
-      const data: NomenclatureResponse = await response.json();
+      const responseText = await response.text();
+      console.log(`📊 Получен ответ номенклатуры (запрос ${requestCount}), длина: ${responseText.length} символов`);
+      
+      let data: NomenclatureResponse;
+      try {
+        data = JSON.parse(responseText) as NomenclatureResponse;
+      } catch (parseError) {
+        console.error(`❌ Ошибка парсинга JSON номенклатуры (запрос ${requestCount}):`, parseError);
+        console.error(`Первые 500 символов ответа: ${responseText.substring(0, 500)}`);
+        
+        // Если это первый запрос, возвращаем ошибку
+        if (requestCount === 1) {
+          return new Response(
+            JSON.stringify({ error: "Ошибка парсинга ответа от API Wildberries (номенклатура)" }),
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        
+        // Если уже есть данные, просто завершаем загрузку
+        console.log(`⚠️ Не удалось распарсить ответ, но есть ${allData.length} записей - завершаем`);
+        break;
+      }
       
       if (!data.cards || !Array.isArray(data.cards)) {
         console.log("⚠️ Нет карточек в ответе");

@@ -215,7 +215,35 @@ export async function POST(request: Request) {
         );
       }
 
-      const dataUnknown = (await res.json()) as unknown;
+      // Получаем текст ответа для дополнительного логирования
+      const responseText = await res.text();
+      console.log(`📊 Получен ответ от API РНП, длина: ${responseText.length} символов`);
+      
+      // Проверяем, что ответ не пустой
+      if (!responseText || responseText.trim() === '') {
+        console.log(`✅ Получен пустой ответ - завершаем пагинацию. Всего записей: ${result.length}`);
+        break;
+      }
+      
+      let dataUnknown: unknown;
+      try {
+        dataUnknown = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error(`❌ Ошибка парсинга JSON РНП:`, parseError);
+        console.error(`Первые 500 символов ответа: ${responseText.substring(0, 500)}`);
+        
+        // Если это первый запрос и парсинг не удался, возвращаем ошибку
+        if (result.length === 0) {
+          return new Response(
+            JSON.stringify({ error: "Ошибка парсинга ответа от API Wildberries" }),
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        
+        // Если уже есть данные, просто завершаем пагинацию
+        console.log(`⚠️ Не удалось распарсить ответ, но есть ${result.length} записей - завершаем`);
+        break;
+      }
       if (!Array.isArray(dataUnknown) || dataUnknown.length === 0) {
         console.log(`✅ Получено данных РНП (ежедневные отчеты): ${result.length} записей`);
         break;

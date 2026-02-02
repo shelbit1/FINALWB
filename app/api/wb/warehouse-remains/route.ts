@@ -177,7 +177,20 @@ export async function POST(request: Request) {
       );
     }
 
-    const warehouseData = (await dlRes.json()) as unknown;
+    const responseText = await dlRes.text();
+    console.log(`📊 Получен ответ остатков, длина: ${responseText.length} символов`);
+    
+    let warehouseData: unknown;
+    try {
+      warehouseData = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error(`❌ Ошибка парсинга JSON остатков:`, parseError);
+      console.error(`Первые 500 символов ответа: ${responseText.substring(0, 500)}`);
+      return new Response(
+        JSON.stringify({ error: "Ошибка парсинга ответа от API Wildberries (остатки)" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
     
     if (!Array.isArray(warehouseData)) {
       return new Response(

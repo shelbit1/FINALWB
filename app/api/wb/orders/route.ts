@@ -89,7 +89,30 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const data: OrderData[] = await response.json();
+      const responseText = await response.text();
+      console.log(`📊 Получен ответ заказов (запрос ${requestCount}), длина: ${responseText.length} символов`);
+      
+      let data: OrderData[];
+      try {
+        const parsed = JSON.parse(responseText);
+        data = Array.isArray(parsed) ? parsed : [];
+      } catch (parseError) {
+        console.error(`❌ Ошибка парсинга JSON заказов (запрос ${requestCount}):`, parseError);
+        console.error(`Первые 500 символов ответа: ${responseText.substring(0, 500)}`);
+        
+        // Если это первый запрос, возвращаем ошибку
+        if (requestCount === 1) {
+          return NextResponse.json(
+            { error: 'Ошибка парсинга ответа от API Wildberries (заказы)' },
+            { status: 500 }
+          );
+        }
+        
+        // Если уже есть данные, просто завершаем загрузку
+        console.log(`⚠️ Не удалось распарсить ответ, но есть ${allOrdersData.length} записей - завершаем`);
+        hasMoreData = false;
+        break;
+      }
       
       console.log(`✅ Получено ${data.length} записей о заказах`);
       
